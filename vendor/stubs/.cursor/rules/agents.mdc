@@ -1,0 +1,15 @@
+---
+description: MAP v1.0 — load AGENTS.md every session
+alwaysApply: true
+---
+
+# Cursor entry point — MAP v1.0 convention
+_Full instructions in AGENTS.md at project root_
+
+@AGENTS.md
+
+## Cursor-specific notes
+- This project follows MAP v1.0 (Markdown for AI Processing)
+- All operating instructions, write rules, and session rituals are defined in AGENTS.md
+- Load @.claude/rules/security.md and @.claude/rules/testing.md every session
+- Personal local rules file: add personal preferences to Cursor's user-level rules settings

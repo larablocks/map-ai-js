@@ -1,0 +1,46 @@
+{
+  "name": "map-ai-js",
+  "version": "0.1.0",
+  "description": "MAP AI documentation scaffold — install & doctor CLI for React, Vue, Next.js, Nuxt, Angular, and plain Node/TypeScript projects",
+  "keywords": [
+    "map",
+    "ai",
+    "agents",
+    "documentation",
+    "scaffold",
+    "react",
+    "vue",
+    "nextjs",
+    "typescript"
+  ],
+  "homepage": "https://github.com/larablocks/map-ai-js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/larablocks/map-ai-js.git"
+  },
+  "bugs": "https://github.com/larablocks/map-ai-js/issues",
+  "license": "MIT",
+  "author": "Eric Mitkowski",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "map-ai-js": "./bin/map-ai-js.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "vendor",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "sync": "bash scripts/sync-from-map-ai.sh"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  }
+}
