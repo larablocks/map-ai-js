@@ -9,6 +9,7 @@
 # template repo itself.
 # ---------------------------------------------------------------------------
 MANAGED_FILES=(
+  .claude/hooks/map-first-run-check.sh
   .cursor/rules/agents.mdc
   docs/MEMORY.example.md
   docs/agents/agent.example.md
@@ -48,6 +49,14 @@ PERSONAL_FILES=(
 # ---------------------------------------------------------------------------
 # User-owned scaffold files — copied once, never overwritten without --force,
 # and backed up to <file>.bak before any forced overwrite.
+#
+# .claude/settings.json is deliberately excluded from this list — install.sh
+# copies it ad hoc (same copy-if-absent semantics, see copy_scaffold calls at
+# the bottom of this file's callers) instead of enumerating it here, because
+# this repo's own root .claude/settings.json is Eric's real Claude Code config
+# for developing this package, not a template mirror, and the "root template
+# files match stubs" test (Installer.php's PHP equivalent) asserts byte-parity
+# for every file in SCAFFOLD_FILES/MANAGED_FILES. Mirrors Installer::SCAFFOLD_FILES.
 # ---------------------------------------------------------------------------
 SCAFFOLD_FILES=(
   AGENTS.md

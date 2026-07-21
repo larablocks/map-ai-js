@@ -138,6 +138,11 @@ for file in "${SCAFFOLD_FILES[@]}"; do
   copy_scaffold "$file"
 done
 
+# Not part of SCAFFOLD_FILES — see that array's comment in lib.sh for why.
+# Same copy-if-absent-else-skip semantics via copy_scaffold, just not
+# enumerated or diffed like the rest of the scaffold.
+copy_scaffold ".claude/settings.json"
+
 # ---------------------------------------------------------------------------
 # Merge .gitignore
 # ---------------------------------------------------------------------------
