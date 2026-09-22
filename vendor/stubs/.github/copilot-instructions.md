@@ -54,6 +54,7 @@ Read docs/qa/[ticket-or-slug].md when reviewing or testing a recently completed 
 _Priority order: BUGS.md first, then ARCHITECTURE_HISTORY.md, then others_
 - Bug found (any source) → append to docs/BUGS.md; Bug fixed and verified → move to docs/BUGS_ARCHIVE.md
 - Branch merged → .map/merge.sh already renumbered any duplicate BUG-N and printed it; fix references to the old number in docs/qa/*.md. If merge.map-ai wasn't registered in this clone, check docs/BUGS.md and docs/BUGS_ARCHIVE.md for duplicates by hand per docs/BUGS.md
+- Merge/rebase stopped on conflicts in MAP docs → follow .claude/skills/map-resolve/SKILL.md (Claude Code: the map-resolve skill). Never `git add` a resolution until the developer has reviewed its diff
 - Architectural decision made → append to docs/ARCHITECTURE_HISTORY.md (hard to reverse or multi-component only)
 - New pattern established → check docs/CODE_PATTERNS.md first, only append if not already covered
 - Project-specific term, abbreviation, or concept a newcomer wouldn't know → add to docs/GLOSSARY.md so new developers can gain context quickly
