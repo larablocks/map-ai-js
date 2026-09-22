@@ -208,6 +208,21 @@ echo "Merging .gitattributes..."
 
 GITATTRIBUTES_FILE="$TARGET/.gitattributes"
 touch "$GITATTRIBUTES_FILE"
+
+# Drop the merge=union lines earlier MAP versions wrote (see lib.sh) — only
+# exact matches, so a project's own attributes are never touched.
+LEGACY_REMOVED=0
+for line in "${LEGACY_GITATTRIBUTES_BLOCK[@]}"; do
+  if grep -qxF "$line" <<< "$(normalize_lines "$GITATTRIBUTES_FILE")"; then
+    grep -vxF "$line" "$GITATTRIBUTES_FILE" > "$GITATTRIBUTES_FILE.tmp" || true
+    mv "$GITATTRIBUTES_FILE.tmp" "$GITATTRIBUTES_FILE"
+    LEGACY_REMOVED=1
+  fi
+done
+if [[ "$LEGACY_REMOVED" -eq 1 ]]; then
+  echo "  [UPDATE] .gitattributes — legacy merge=union entries removed"
+fi
+
 GITATTRIBUTES_EXISTING="$(normalize_lines "$GITATTRIBUTES_FILE")"
 
 MISSING_ATTRS=()
@@ -219,25 +234,33 @@ done
 
 if [[ ${#MISSING_ATTRS[@]} -eq 0 ]]; then
   echo "  [SKIP]   .gitattributes — MAP entries already present"
-elif [[ ${#MISSING_ATTRS[@]} -eq ${#GITATTRIBUTES_BLOCK[@]} ]]; then
-  {
-    echo ""
-    echo "# MAP — merge-friendly append-only logs"
-    for line in "${GITATTRIBUTES_BLOCK[@]}"; do
-      echo "$line"
-    done
-  } >> "$GITATTRIBUTES_FILE"
-  echo "  [UPDATE] .gitattributes — MAP entries appended"
 else
-  # Some entries already present — append only the missing ones so existing
-  # lines aren't duplicated.
   {
     echo ""
+    # Only re-emit the header on a first write — a partial match means it's
+    # already there, so append just the missing entries.
+    grep -qxF "$GITATTRIBUTES_HEADER" <<< "$GITATTRIBUTES_EXISTING" || echo "$GITATTRIBUTES_HEADER"
     for line in "${MISSING_ATTRS[@]}"; do
       echo "$line"
     done
   } >> "$GITATTRIBUTES_FILE"
   echo "  [UPDATE] .gitattributes — MAP entries appended"
+fi
+
+# ---------------------------------------------------------------------------
+# Register the merge driver in this clone's git config
+# ---------------------------------------------------------------------------
+echo ""
+echo "Registering merge driver..."
+
+if ! is_git_repo "$TARGET"; then
+  echo "  [SKIP]   merge.map-ai — not a git repository (run install again after git init)"
+elif merge_driver_registered "$TARGET"; then
+  echo "  [SKIP]   merge.map-ai — already registered"
+elif register_merge_driver "$TARGET"; then
+  echo "  [UPDATE] merge.map-ai — registered in .git/config"
+else
+  echo "  [WARN]   merge.map-ai — could not write git config"
 fi
 
 # ---------------------------------------------------------------------------

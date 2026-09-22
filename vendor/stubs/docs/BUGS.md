@@ -7,15 +7,15 @@ _Distinct from a coverage gap (docs/TESTING_COVERAGE.md `[none]`/`[partial]` row
 
 <!-- Severity: blocking=no further work | high=no workaround | medium=workaround exists | low=minor -->
 <!-- Verification tag: append (Verified.) if a human or a passing test confirmed the bug and its fix, or (Agent-reported.) if only Claude observed it — carry the tag forward into docs/BUGS_ARCHIVE.md -->
-<!-- Merge conflicts: this file has merge=union in .gitattributes, so concurrent additions from
-     different branches combine automatically instead of producing conflict markers. That does
-     NOT catch two branches independently assigning the same BUG-N. After merging, scan the
-     combined file (and docs/BUGS_ARCHIVE.md) for duplicate BUG-N headers — keep whichever entry
-     comes first, renumber the other to the next free number, and fix any references to the old
-     number in this file, docs/BUGS_ARCHIVE.md, and docs/qa/*.md. If numbering ever needs a clean
-     reset instead of a per-entry rename, append a dated "### Numbering note — YYYY-MM-DD" entry
-     under Open bugs stating the next unused number explicitly, so future scans don't have to
-     recount from history. -->
+<!-- Merge conflicts: this file has merge=map-ai in .gitattributes, so .map/merge.sh resolves
+     the usual conflicts on merge — entries added on both branches are both kept, a bug one branch
+     moved to docs/BUGS_ARCHIVE.md stays moved, and when both branches picked the same BUG-N the
+     one that was already on your side keeps it and the other is renumbered to the next free
+     number (the merge prints which). After such a renumber, fix any references to the old number
+     in docs/qa/*.md. Anything it can't resolve safely — the same bug edited differently on both
+     branches — is left as a normal conflict. If numbering ever needs a clean reset instead of a
+     per-entry rename, append a dated "### Numbering note — YYYY-MM-DD" entry under Open bugs
+     stating the next unused number explicitly, so future scans don't have to recount from history. -->
 
 ## Open bugs
 <!-- BUG-N: if a dated "### Numbering note" entry exists below, use the number it states as the next available and skip the recount; otherwise scan BOTH this file and docs/BUGS_ARCHIVE.md for the highest existing number and increment by 1 — numbers are permanent, never reused -->

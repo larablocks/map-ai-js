@@ -19,6 +19,18 @@ if [[ -f .claude/rules/meta.md ]]; then
   exit 0
 fi
 
+# Register MAP's markdown merge driver for this clone. .gitattributes (committed)
+# routes MAP docs to merge=map-ai, but the driver itself lives in .git/config,
+# which never travels with a clone — so a teammate's fresh clone gets it here on
+# their first Claude Code session. Silent and idempotent; mirrors lib.sh's
+# MERGE_DRIVER_COMMAND.
+MERGE_DRIVER_COMMAND='bash "$(git rev-parse --show-toplevel)/.map/merge.sh" %O %A %B %P'
+if [[ -f .map/merge.sh ]] && git rev-parse --is-inside-work-tree >/dev/null 2>&1 &&
+  [[ "$(git config --get merge.map-ai.driver 2>/dev/null)" != "$MERGE_DRIVER_COMMAND" ]]; then
+  git config merge.map-ai.name "MAP structured markdown merge" 2>/dev/null || true
+  git config merge.map-ai.driver "$MERGE_DRIVER_COMMAND" 2>/dev/null || true
+fi
+
 markers=()
 
 if [[ -f docs/STATUS.md ]] && grep -q '\[Current milestone or phase\]' docs/STATUS.md; then

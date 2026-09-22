@@ -623,6 +623,12 @@ elif ! grep -q 'map-token-check.sh' "$SETTINGS_PATH"; then
   ((REVIEW_FOUND++)) || true
 fi
 
+# Mirrors Doctor.php's merge-driver-not-registered — --fix's install.sh registers it.
+if is_git_repo "$TARGET" && ! merge_driver_registered "$TARGET"; then
+  echo "  [FIXABLE]  merge-driver-not-registered .git/config  (merge.map-ai isn't registered in this clone — git falls back to its normal text merge for MAP docs)"
+  ((FIXABLE_FOUND++)) || true
+fi
+
 if COPILOT_REGENERATED="$(regenerate_copilot "$TARGET")"; then
   COPILOT_PATH="$TARGET/.github/copilot-instructions.md"
   COPILOT_CURRENT=""

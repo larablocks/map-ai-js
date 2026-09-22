@@ -12,6 +12,7 @@ MANAGED_FILES=(
   .claude/hooks/map-token-check.sh
   .claude/hooks/map-first-run-check.sh
   .cursor/rules/agents.mdc
+  .map/merge.sh
   docs/MEMORY.example.md
   docs/agents/agent.example.md
   docs/api/api.example.md
@@ -99,16 +100,67 @@ GITIGNORE_GROUP_3_HEADER="# Claude auto-memory — session/machine specific
 # Copy *.example.md files to their non-example versions on first clone"
 GITIGNORE_GROUP_3=("docs/MEMORY.md" "docs/memory/*.md" "!docs/memory/*.example.md" "!docs/memory/shared.md")
 
-# .gitattributes lines to merge into a target (in order)
-# merge=union lets concurrent appends to these append-only logs combine automatically
-# instead of producing conflict markers. See docs/BUGS.md for the post-merge procedure
-# for two branches that independently assigned the same BUG-N.
+# .gitattributes lines to merge into a target (in order). merge=map-ai routes
+# the Claude-maintained docs through .map/merge.sh, which resolves the
+# conflicts markdown docs typically hit (both branches appending entries or
+# table rows, bumping "Last updated", picking the same next BUG-N) and leaves
+# real conflicts to a human. Human-authored docs (DESIGN/DOCKER/SETUP/
+# COMPLIANCE) are deliberately left on git's normal merge. Mirrors
+# Installer::GITATTRIBUTES_ENTRIES.
+GITATTRIBUTES_HEADER="# MAP — structured markdown merge driver (.map/merge.sh, registered per clone)"
 GITATTRIBUTES_BLOCK=(
+  "docs/BUGS.md merge=map-ai"
+  "docs/BUGS_ARCHIVE.md merge=map-ai"
+  "docs/ARCHITECTURE_HISTORY.md merge=map-ai"
+  "docs/METRICS_HISTORY.md merge=map-ai"
+  "docs/STATUS.md merge=map-ai"
+  "docs/ARCHITECTURE.md merge=map-ai"
+  "docs/CODE_PATTERNS.md merge=map-ai"
+  "docs/COMMANDS.md merge=map-ai"
+  "docs/FEATURE_FLAGS.md merge=map-ai"
+  "docs/GLOSSARY.md merge=map-ai"
+  "docs/SCHEMA.md merge=map-ai"
+  "docs/TESTING_COVERAGE.md merge=map-ai"
+  "docs/memory/shared.md merge=map-ai"
+  "docs/agents/*.md merge=map-ai"
+  "docs/api/*.md merge=map-ai"
+  "docs/architecture/*.md merge=map-ai"
+  "docs/integrations/*.md merge=map-ai"
+  "docs/qa/*.md merge=map-ai"
+)
+
+# Lines earlier MAP versions wrote. merge=union kept every line from both
+# sides, which resurrected bugs one branch had moved to BUGS_ARCHIVE.md —
+# removed on install now that merge=map-ai replaces them. Mirrors
+# Installer::LEGACY_GITATTRIBUTES_ENTRIES.
+LEGACY_GITATTRIBUTES_BLOCK=(
   "docs/BUGS.md merge=union"
   "docs/BUGS_ARCHIVE.md merge=union"
   "docs/ARCHITECTURE_HISTORY.md merge=union"
   "docs/METRICS_HISTORY.md merge=union"
 )
+
+# The per-clone git config that makes merge=map-ai mean something. git config
+# is never committed, so every clone registers it once — install.sh, doctor
+# --fix and the SessionStart hook all do. Unregistered, git silently falls
+# back to its normal text merge for these files. Mirrors Installer::MERGE_DRIVER.
+MERGE_DRIVER_NAME="MAP structured markdown merge"
+MERGE_DRIVER_COMMAND='bash "$(git rev-parse --show-toplevel)/.map/merge.sh" %O %A %B %P'
+
+# True if $1 is inside a git work tree.
+is_git_repo() {
+  git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
+# True if $1's clone already has the MAP merge driver registered exactly.
+merge_driver_registered() {
+  [[ "$(git -C "$1" config --get merge.map-ai.driver 2>/dev/null)" == "$MERGE_DRIVER_COMMAND" ]]
+}
+
+register_merge_driver() {
+  git -C "$1" config merge.map-ai.name "$MERGE_DRIVER_NAME" &&
+    git -C "$1" config merge.map-ai.driver "$MERGE_DRIVER_COMMAND"
+}
 
 # Strips CRLF and surrounding whitespace from each line of $1 so a line
 # that's already present but byte-different (e.g. CRLF endings, leading or
