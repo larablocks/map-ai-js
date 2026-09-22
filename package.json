@@ -1,6 +1,6 @@
 {
   "name": "map-ai-js",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "MAP AI documentation scaffold — install & doctor CLI for React, Vue, Next.js, Nuxt, Angular, and plain Node/TypeScript projects",
   "keywords": [
     "map",

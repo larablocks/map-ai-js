@@ -58,9 +58,9 @@ _Priority order: BUGS.md first, then ARCHITECTURE_HISTORY.md, then others_
 - New pattern established → check docs/CODE_PATTERNS.md first, only append if not already covered
 - Project-specific term, abbreviation, or concept a newcomer wouldn't know → add to docs/GLOSSARY.md so new developers can gain context quickly
 - Surprising behaviour → route by topic (all in docs/memory/): the stack-specific file (see docs/MEMORY.md's table) | database.md | testing.md | environment.md | performance.md | agents.md
-- Learning applies to the whole team, not just one machine → also append to docs/memory/shared.md (max 50 entries — remove least-actionable when full)
+- Learning applies to the whole team, not just one machine → also append to docs/memory/shared.md (max ~1,500 tokens — remove least-actionable when full)
 - Memory file updated → update entry count in docs/MEMORY.md summary table
-- Time wasted on a mistake → append to docs/memory/gotchas.md (max 10 entries — remove least-actionable when full)
+- Time wasted on a mistake → append to docs/memory/gotchas.md (max ~750 tokens — remove least-actionable when full)
 - Schema changed → update docs/SCHEMA.md immediately
 - Architecture changed → update docs/ARCHITECTURE.md to reflect current state
 - Tests added or coverage run → update docs/TESTING_COVERAGE.md from command output
@@ -93,6 +93,7 @@ New agent/API/integration/component docs → scan the target folder's frontmatte
 - Use YYYY-MM-DD for all dates in all files
 - IMPORTANT: Only update docs/TESTING_COVERAGE.md after running coverage — never estimate without fresh output
 - IMPORTANT: Never skip the session start ritual
+- IMPORTANT: Keep AGENTS.md under 3000 tokens (estimate: bytes ÷ 4) — it loads every session. If a change would push it over, propose cuts to the developer instead of adding
 
 ## Project hard rules
 [Project-specific hard rules that don't fit the generic list above — e.g. "never call the production billing API from a dev session." Delete this line once real rules are added; leave the section empty if there are none yet.]

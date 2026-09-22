@@ -9,6 +9,7 @@
 # template repo itself.
 # ---------------------------------------------------------------------------
 MANAGED_FILES=(
+  .claude/hooks/map-token-check.sh
   .claude/hooks/map-first-run-check.sh
   .cursor/rules/agents.mdc
   docs/MEMORY.example.md

@@ -6,7 +6,7 @@ description: [One sentence: why this project uses this service and when to load 
 # [Service Name]
 _Copy this file to docs/integrations/[service-name].md when documenting a new integration_
 _Load this file when working with this service_
-_If this integration grows past ~150 lines or covers multiple distinct concerns, split into [service]-[topic].md companion files and make this file the index — link to each companion here and note inline that both must be kept current together_
+_If this integration grows past ~2,000 tokens (bytes ÷ 4) or covers multiple distinct concerns, split into [service]-[topic].md companion files and make this file the index — link to each companion here and note inline that both must be kept current together_
 
 ## Purpose
 [Why this project uses this service. One sentence.]

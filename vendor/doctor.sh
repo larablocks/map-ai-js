@@ -56,7 +56,10 @@ if [[ ! -d "$TARGET" ]]; then
   exit 1
 fi
 
-AGENTS_MD_MAX_LINES=100
+# AGENTS.md loads into every session — capped in tokens, not lines, since one
+# long line costs as much as many short ones. Estimate is bytes ÷ 4 rounded up,
+# matching Doctor::estimateTokens() and .claude/hooks/map-token-check.sh.
+AGENTS_MD_MAX_TOKENS=3000
 FIXABLE_FOUND=0
 REVIEW_FOUND=0
 
@@ -599,11 +602,25 @@ done
 
 AGENTS_PATH="$TARGET/AGENTS.md"
 if [[ -f "$AGENTS_PATH" ]]; then
-  AGENTS_LINE_COUNT="$(wc -l < "$AGENTS_PATH" | tr -d ' ')"
-  if (( AGENTS_LINE_COUNT > AGENTS_MD_MAX_LINES )); then
-    echo "  [REVIEW]   agents-md-too-long      AGENTS.md ($AGENTS_LINE_COUNT lines, over the $AGENTS_MD_MAX_LINES line cap — trim by hand)"
+  AGENTS_BYTES="$(wc -c < "$AGENTS_PATH" | tr -d ' ')"
+  AGENTS_TOKENS=$(( (AGENTS_BYTES + 3) / 4 ))
+  if (( AGENTS_TOKENS > AGENTS_MD_MAX_TOKENS )); then
+    echo "  [REVIEW]   agents-md-too-long      AGENTS.md (~$AGENTS_TOKENS tokens, over the $AGENTS_MD_MAX_TOKENS token cap — trim by hand)"
     ((REVIEW_FOUND++)) || true
   fi
+fi
+
+# .claude/settings.json is copy-if-absent, so older installs never get the
+# token-check hook registered. Review-only — settings may hold unrelated
+# hooks/permissions. Mirrors Doctor::checkTokenHookRegistered().
+SETTINGS_PATH="$TARGET/.claude/settings.json"
+if [[ ! -f "$SETTINGS_PATH" ]]; then
+  # Absent entirely → --fix's install.sh copies the stub in, hooks and all.
+  echo "  [FIXABLE]  missing-file             .claude/settings.json"
+  ((FIXABLE_FOUND++)) || true
+elif ! grep -q 'map-token-check.sh' "$SETTINGS_PATH"; then
+  echo "  [REVIEW]   token-hook-not-registered .claude/settings.json  (copy the map-token-check.sh SessionStart and PostToolUse entries from the stub by hand)"
+  ((REVIEW_FOUND++)) || true
 fi
 
 if COPILOT_REGENERATED="$(regenerate_copilot "$TARGET")"; then

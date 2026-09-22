@@ -14,6 +14,6 @@ _Last updated: YYYY-MM-DD_
 | [ABC] | [Full form and what it refers to in this project] |
 
 ## Domain concepts
-_Keep each concept to 3-5 lines — link to external docs for deeper reference_
+_Keep each concept to ~100 tokens — link to external docs for deeper reference_
 [Complex concepts that affect how features should be built.
 Include business rules or constraints tied to each concept.]

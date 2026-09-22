@@ -1,6 +1,6 @@
 # ARCHITECTURE_HISTORY.md
 _Append-only — never edit or delete. Claude writes immediately on decision._
-_Current state: docs/ARCHITECTURE.md | Summarise superseded entries when approaching 200 lines_
+_Current state: docs/ARCHITECTURE.md | No size limit — never summarise, trim, or archive entries_
 _Reversals: add new entry "YYYY-MM-DD — Reversal of [original title]"_
 
 ## Decision format

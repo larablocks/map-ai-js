@@ -23,4 +23,4 @@ _Project-specific only — not general conventions_
 **Example:** [Brief code reference]
 -->
 
-<!-- Review and remove obvious patterns when file exceeds 150 lines -->
+<!-- Review and remove obvious patterns when file exceeds ~2,000 tokens (bytes ÷ 4) -->
