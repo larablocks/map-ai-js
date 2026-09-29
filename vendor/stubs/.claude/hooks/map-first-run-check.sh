@@ -11,7 +11,7 @@
 set -euo pipefail
 
 ROOT="${CLAUDE_PROJECT_DIR:-.}"
-cd "$ROOT"
+cd "$ROOT" 2>/dev/null || exit 0
 
 # This repo is the MAP template source itself, not a consuming project — its
 # docs intentionally keep placeholders forever. See .claude/rules/meta.md.
@@ -23,8 +23,9 @@ fi
 # routes MAP docs to merge=map-ai, but the driver itself lives in .git/config,
 # which never travels with a clone — so a teammate's fresh clone gets it here on
 # their first Claude Code session. Silent and idempotent; mirrors lib.sh's
-# MERGE_DRIVER_COMMAND.
-MERGE_DRIVER_COMMAND='bash "$(git rev-parse --show-toplevel)/.map/merge.sh" %O %A %B %P'
+# merge_driver_command (git runs drivers from the repo root, so a project in a
+# subdirectory needs that prefix in the path).
+MERGE_DRIVER_COMMAND="bash \"\$(git rev-parse --show-toplevel)/$(git rev-parse --show-prefix 2>/dev/null || true).map/merge.sh\" %O %A %B %P"
 if [[ -f .map/merge.sh ]] && git rev-parse --is-inside-work-tree >/dev/null 2>&1 &&
   [[ "$(git config --get merge.map-ai.driver 2>/dev/null)" != "$MERGE_DRIVER_COMMAND" ]]; then
   git config merge.map-ai.name "MAP structured markdown merge" 2>/dev/null || true
@@ -56,9 +57,8 @@ if [[ -f AGENTS.md ]] && grep -q '\[PROJECT NAME\]' AGENTS.md; then
 fi
 
 if [[ ${#markers[@]} -gt 0 ]]; then
-  IFS=', '
-  joined="${markers[*]}"
-  unset IFS
+  joined="${markers[0]}"
+  for m in "${markers[@]:1}"; do joined="$joined, $m"; done
   context+=("MAP first-run check: ${joined} still contain template placeholders — this project has never been initialized by an AI agent. Before doing anything else, including responding to the developer's first message, complete AGENTS.md's Session start ritual item 0 (first-run check) now.")
 fi
 

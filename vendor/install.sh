@@ -210,15 +210,21 @@ GITATTRIBUTES_FILE="$TARGET/.gitattributes"
 touch "$GITATTRIBUTES_FILE"
 
 # Drop the merge=union lines earlier MAP versions wrote (see lib.sh) — only
-# exact matches, so a project's own attributes are never touched.
+# exact matches (ignoring CR and surrounding whitespace, like Installer.php's
+# trim()), so a project's own attributes are never touched.
 LEGACY_REMOVED=0
-for line in "${LEGACY_GITATTRIBUTES_BLOCK[@]}"; do
-  if grep -qxF "$line" <<< "$(normalize_lines "$GITATTRIBUTES_FILE")"; then
-    grep -vxF "$line" "$GITATTRIBUTES_FILE" > "$GITATTRIBUTES_FILE.tmp" || true
-    mv "$GITATTRIBUTES_FILE.tmp" "$GITATTRIBUTES_FILE"
-    LEGACY_REMOVED=1
-  fi
-done
+printf '%s\n' "${LEGACY_GITATTRIBUTES_BLOCK[@]}" > "$GITATTRIBUTES_FILE.legacy"
+awk '
+  FILENAME == ARGV[1] { legacy[$0] = 1; next }
+  { line = $0; gsub(/\r/, "", line); gsub(/^[[:space:]]+|[[:space:]]+$/, "", line) }
+  line in legacy { removed = 1; next }
+  { print }
+  END { exit removed ? 0 : 1 }
+' "$GITATTRIBUTES_FILE.legacy" "$GITATTRIBUTES_FILE" > "$GITATTRIBUTES_FILE.tmp" && LEGACY_REMOVED=1
+if [[ "$LEGACY_REMOVED" -eq 1 ]]; then
+  mv "$GITATTRIBUTES_FILE.tmp" "$GITATTRIBUTES_FILE"
+fi
+rm -f "$GITATTRIBUTES_FILE.legacy" "$GITATTRIBUTES_FILE.tmp"
 if [[ "$LEGACY_REMOVED" -eq 1 ]]; then
   echo "  [UPDATE] .gitattributes — legacy merge=union entries removed"
 fi

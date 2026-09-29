@@ -59,8 +59,9 @@ if grep -q '"hook_event_name"[[:space:]]*:[[:space:]]*"PostToolUse"' <<< "$INPUT
   EVENT="PostToolUse"
   FILE_PATH="$(sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<< "$INPUT" | head -n 1)"
   [[ -n "$FILE_PATH" ]] || exit 0
-  # JSON may escape "/" as "\/" — valid, if unusual.
-  FILE_PATH="${FILE_PATH//\\\//\/}"
+  # JSON may escape "/" as "\/" — valid, if unusual. sed, not ${//}: bash 3.2
+  # (stock macOS) parses the escaped pattern differently.
+  FILE_PATH="$(printf '%s' "$FILE_PATH" | sed 's#\\/#/#g')"
   # Normalise to project-relative — Claude Code passes absolute paths.
   PROJECT_ABS="$(pwd -P)"
   FILE_PATH="${FILE_PATH#"$PROJECT_ABS"/}"

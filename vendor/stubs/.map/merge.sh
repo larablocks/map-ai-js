@@ -81,7 +81,12 @@ TMP="$(mktemp -d 2>/dev/null || mktemp -d -t map-merge)"
 trap 'rm -rf "$TMP"' EXIT
 
 if [[ "${1:-}" == "--check-bugs" || "${1:-}" == "--fix-bugs" ]]; then
-  cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" || exit 2
+  # Runs on the project in the current directory (where docs/ is — which may
+  # be a subdirectory of the git repo); falls back to the project this script
+  # was installed into.
+  if [[ ! -f docs/BUGS.md && ! -f docs/BUGS_ARCHIVE.md ]]; then
+    cd "$(dirname "$0")/.." 2>/dev/null || exit 2
+  fi
   FIX=0; [[ "$1" == "--fix-bugs" ]] && FIX=1
   files=()
   for f in docs/BUGS_ARCHIVE.md docs/BUGS.md; do [[ -f "$f" ]] && files+=("$f"); done
@@ -104,11 +109,13 @@ if [[ "${1:-}" == "--check-bugs" || "${1:-}" == "--fix-bugs" ]]; then
       if (!in_code($0) && match($0, /^#+[[:space:]]+BUG-[0-9]+/)) {
         b = substr($0, 1, RLENGTH); sub(/^#+[[:space:]]+BUG-/, "", b); b += 0
         if (b in first) {
-          dup = 1
           printf "map-merge: BUG-%d is used twice — %s and %s: \"%s\"\n", b, first[b], FILENAME, $0
-          if (fix) {
+          if (fix && FILENAME !~ /BUGS_ARCHIVE\.md$/) {
             max++; line = $0; sub("BUG-" b, "BUG-" max, line); lines[FILENAME, FNR] = line; changed[FILENAME] = 1
             printf "map-merge: renumbered it to BUG-%d in %s — update any references to it (e.g. docs/qa/*.md)\n", max, FILENAME
+          } else {
+            dup = 1
+            if (fix) printf "map-merge: both copies are in %s, which is never edited automatically — renumber or remove one by hand\n", FILENAME
           }
         } else first[b] = FILENAME
       }
@@ -119,7 +126,7 @@ if [[ "${1:-}" == "--check-bugs" || "${1:-}" == "--fix-bugs" ]]; then
         for (i = 1; i <= count[file[k]]; i++) print lines[file[k], i] > out
         close(out); system("cp \"" out "\" \"" file[k] "\"")
       }
-      exit (dup && !fix) ? 1 : 0
+      exit dup ? 1 : 0
     }
   ' "${files[@]}"
   exit $?
@@ -128,16 +135,30 @@ fi
 RESOLVE_MODE=0
 if [[ "${1:-}" == "--resolve" ]]; then
   RESOLVE_MODE=1
-  TARGET_PATH="${2:?usage: merge.sh --resolve <path>}"
-  cd "$(git rev-parse --show-toplevel)" || exit 2
-  TARGET_PATH="${TARGET_PATH#./}"
-  if ! git ls-files -u -- "$TARGET_PATH" | grep -q .; then
-    echo "map-merge: $TARGET_PATH is not in a conflicted state — nothing to resolve" >&2
+  GIVEN_PATH="${2:?usage: merge.sh --resolve <path>}"
+  # Resolve the path as given (relative to here, or absolute) to its
+  # repo-relative form before moving to the repo root — git show :N:<path>
+  # only takes the latter, and a failed read must never pass for an empty side.
+  given_dir="$(dirname "$GIVEN_PATH")"
+  stages="$(git -C "$given_dir" ls-files -u --full-name -- "$(basename "$GIVEN_PATH")" 2>/dev/null)"
+  if [[ -z "$stages" ]]; then
+    echo "map-merge: $GIVEN_PATH is not in a conflicted state — nothing to resolve" >&2
     exit 2
   fi
-  git show ":1:$TARGET_PATH" > "$TMP/stage-base" 2>/dev/null || : > "$TMP/stage-base"
-  git show ":2:$TARGET_PATH" > "$TMP/stage-ours" 2>/dev/null || : > "$TMP/stage-ours"
-  git show ":3:$TARGET_PATH" > "$TMP/stage-theirs" 2>/dev/null || : > "$TMP/stage-theirs"
+  TARGET_PATH="$(printf '%s\n' "$stages" | head -n 1 | cut -f2)"
+  cd "$(git -C "$given_dir" rev-parse --show-toplevel)" || exit 2
+  has_stage() { printf '%s\n' "$stages" | awk -v n="$1" '{ split($0, f, /[ \t]+/); if (f[3] == n) found = 1 } END { exit !found }'; }
+  if ! has_stage 2 || ! has_stage 3; then
+    echo "map-merge: $TARGET_PATH was deleted on one side and changed on the other — resolve that by hand (keep it with git add, or git rm)" >&2
+    exit 2
+  fi
+  git show ":2:$TARGET_PATH" > "$TMP/stage-ours" || exit 2
+  git show ":3:$TARGET_PATH" > "$TMP/stage-theirs" || exit 2
+  if has_stage 1; then
+    git show ":1:$TARGET_PATH" > "$TMP/stage-base" || exit 2
+  else
+    : > "$TMP/stage-base" # added on both sides
+  fi
   BASE="$TMP/stage-base"
   OURS="$TMP/stage-result"
   THEIRS="$TMP/stage-theirs"
@@ -198,7 +219,9 @@ renumber_bugs() {
   incoming="$(incoming_commit)"
   if [[ -n "$incoming" ]]; then theirs_ref="${incoming%% *}"; base_ref="${incoming#* }"; fi
   : > "$extra"
-  for f in docs/BUGS.md docs/BUGS_ARCHIVE.md; do
+  # Repo-relative, like %P — the project may live in a subdirectory.
+  local docs_dir="${TARGET_PATH%BUGS*.md}"
+  for f in "${docs_dir}BUGS.md" "${docs_dir}BUGS_ARCHIVE.md"; do
     [[ -f "$f" ]] && cat "$f" >> "$extra"
     for ref in HEAD $theirs_ref; do
       git show "$ref:$f" >> "$extra" 2>/dev/null || true
@@ -218,7 +241,8 @@ renumber_bugs() {
   heading_numbers() { grep -oE '^#+[[:space:]]+BUG-[0-9]+' | grep -oE '[0-9]+$' | sort -u; }
   { [[ -n "$base_ref" ]] && git show "$base_ref:$other" 2>/dev/null; cat "$TMP/base"; } | heading_numbers > "$TMP/base-numbers"
   if [[ -n "$base_ref" ]]; then
-    cross="$(git show "HEAD:$other" 2>/dev/null | heading_numbers | grep -vxF -f "$TMP/base-numbers" | tr '\n' ' ')"
+    # awk, not grep -vxF -f: some BSD greps treat an empty pattern file as matching everything.
+    cross="$(git show "HEAD:$other" 2>/dev/null | heading_numbers | awk 'FILENAME == ARGV[1] { at_base[$0] = 1; next } !($0 in at_base)' "$TMP/base-numbers" - | tr '\n' ' ')"
   fi
   : > "$TMP/same-bug"
 
@@ -341,6 +365,8 @@ split_blocks() {
         for (l in path) if (l + 0 > level) delete path[l]
         key = ""
         for (l = 1; l <= level; l++) if (l in path) key = (key == "" ? path[l] : key " > " path[l])
+        gsub(/\t/, "\\t", key) # keys live in tab-separated indexes
+        sub(/\r$/, "", key)
         start_block(key)
       }
       print > out
@@ -403,10 +429,14 @@ resolve_hunks() {
 
     # List items only (one list, one indent): 3-way merge keyed by item text.
     # One-line dated entries ("2026-09-10 — ...", as in memory/shared.md)
-    # count as items too. An item removed on either side stays removed; items
-    # added on either side are kept, ours then theirs; numbered items are
-    # renumbered. Items kept by both sides must keep their relative order — a
-    # reprioritised list is a real conflict.
+    # count as items too. An item removed on either side stays removed; an
+    # item added on either side goes right after the item it followed on that
+    # side (ours before theirs at the same spot). An added item that starts
+    # with the text of a removed item ("Ship auth" → "Ship auth v2"), or vice versa,
+    # is an edit of it and keeps its place. Real conflicts, left alone: both
+    # sides reordered the items they kept, both edited the same item
+    # differently, or one edited an item the other removed. Numbered items
+    # ("1." / "1)") are renumbered.
     function item_prefix(line) { return match(line, /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+/) ? substr(line, 1, RLENGTH) : "" }
     function is_item(line) { return item_prefix(line) != "" || line ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][[:space:]]/ }
     function indent_of(line) { match(line, /^[[:space:]]*/); return RLENGTH }
@@ -418,7 +448,21 @@ resolve_hunks() {
       split("", occ)
       for (i = 1; i <= n; i++) { k = substr(arr[i], length(item_prefix(arr[i])) + 1); k = k SUBSEP (++occ[k]); keys[i] = k; set[k] = i }
     }
-    function merge_list(    ind, ko, kb, kt, so, sb, st, i, k, s1, s2, c1, c2, num, line, p) {
+    function item_text(k) { sub(SUBSEP ".*", "", k); sub(/\r$/, "", k); gsub(/^[[:space:]]+|[[:space:]]+$/, "", k); return k }
+    function is_edit(added, removed,    a, r) {
+      a = item_text(added); r = item_text(removed)
+      return a != "" && r != "" && (index(a, r) == 1 || index(r, a) == 1)
+    }
+    # For one side: edit_of[base key] = the side index of its edit; edit_slot[side index] = base index.
+    function find_edits(keys, n, set, edit_of, edit_slot,    i, j) {
+      for (i = 1; i <= n; i++) {
+        if (keys[i] in sb) continue
+        for (j = 1; j <= nb; j++) if (!(kb[j] in set) && !(kb[j] in edit_of) && is_edit(keys[i], kb[j])) {
+          edit_of[kb[j]] = i; edit_slot[i] = j; break
+        }
+      }
+    }
+    function merge_list(    ind, i, j, k, s1, s2, c1, c2, eo, et, so_slot, st_slot, emit, has, slot, add, nadd, num, line, out_n, x) {
       ind = indent_of(b[1])
       if (!all_items(o, no, ind) || !all_items(b, nb, ind) || !all_items(t, nt, ind)) return 0
       split("", ko); split("", kb); split("", kt); split("", so); split("", sb); split("", st)
@@ -427,26 +471,68 @@ resolve_hunks() {
       for (i = 1; i <= no; i++) if ((ko[i] in sb) && (ko[i] in st)) s1[++c1] = ko[i]
       for (i = 1; i <= nt; i++) if ((kt[i] in sb) && (kt[i] in so)) s2[++c2] = kt[i]
       for (i = 1; i <= c1; i++) if (s1[i] != s2[i]) return 0
+
+      split("", eo); split("", et); split("", so_slot); split("", st_slot)
+      find_edits(ko, no, so, eo, so_slot); find_edits(kt, nt, st, et, st_slot)
+
+      # One slot per base item, in base order: what (if anything) stands there now.
+      split("", emit); split("", has)
+      for (j = 1; j <= nb; j++) {
+        k = kb[j]
+        if ((k in so) && (k in st)) { emit[j] = o[so[k]]; has[j] = 1 }
+        else if (!(k in so) && !(k in st)) {
+          if ((k in eo) && (k in et)) {
+            if (item_text(ko[eo[k]]) != item_text(kt[et[k]])) return 0 # edited differently on both sides
+            emit[j] = o[eo[k]]; has[j] = 1
+          } else if ((k in eo) || (k in et)) return 0 # edited on one side, removed on the other
+        } else if (!(k in so)) { if (k in eo) { emit[j] = o[eo[k]]; has[j] = 1 } } # we edited it, or removed it
+        else if (k in et) { emit[j] = t[et[k]]; has[j] = 1 } # they edited it, or removed it
+      }
+
+      # Additions go after the nearest item that preceded them on their own
+      # side and is still in the result (one the other side removed does not
+      # count — the two additions would otherwise swap order).
+      split("", add); split("", nadd)
+      slot = 0
+      for (i = 1; i <= no; i++) {
+        if (ko[i] in sb) { if (sb[ko[i]] in has) slot = sb[ko[i]] }
+        else if (i in so_slot) slot = so_slot[i]
+        else add["o", slot, ++nadd["o", slot]] = o[i]
+      }
+      slot = 0
+      for (i = 1; i <= nt; i++) {
+        if (kt[i] in sb) { if (sb[kt[i]] in has) slot = sb[kt[i]] }
+        else if (i in st_slot) slot = st_slot[i]
+        else if (!(kt[i] in so)) add["t", slot, ++nadd["t", slot]] = t[i] # ours may have added the same item
+      }
+
       out_n = 0
-      for (i = 1; i <= no; i++) if (!((ko[i] in sb) && !(ko[i] in st))) out[++out_n] = o[i]
-      for (i = 1; i <= nt; i++) if (!(kt[i] in sb) && !(kt[i] in so)) out[++out_n] = t[i]
+      for (j = 0; j <= nb; j++) {
+        if (j in has) list_out[++out_n] = emit[j]
+        for (x = 1; x <= nadd["o", j]; x++) list_out[++out_n] = add["o", j, x]
+        for (x = 1; x <= nadd["t", j]; x++) list_out[++out_n] = add["t", j, x]
+      }
+
       num = -1
-      if (match(b[1], /^[[:space:]]*[0-9]+/)) num = substr(b[1], ind + 1, RLENGTH - ind) + 0
+      if (match(b[1], /^[[:space:]]*[0-9]+[.)][[:space:]]/)) { match(b[1], /^[[:space:]]*[0-9]+/); num = substr(b[1], ind + 1, RLENGTH - ind) + 0 }
       for (i = 1; i <= out_n; i++) {
-        line = out[i]
-        if (num >= 0 && match(line, /^[[:space:]]*[0-9]+/)) { p = substr(line, 1, ind); line = p num substr(line, RLENGTH + 1); num++ }
+        line = list_out[i]
+        if (num >= 0 && line ~ /^[[:space:]]*[0-9]+[.)][[:space:]]/) { match(line, /^[[:space:]]*[0-9]+/); line = substr(line, 1, ind) num substr(line, RLENGTH + 1); num++ }
         print line
       }
       return 1
     }
 
     function resolve(    i, have) {
-      # Nothing in the base: both sides only inserted here — ours, then theirs
-      # (minus non-blank lines ours already has).
+      # Nothing in the base: both sides only inserted here — ours, then theirs.
+      # When every inserted line is a one-line row or item, theirs skips the
+      # ones ours already added; a multi-line entry is always kept whole (its
+      # field lines and code fences repeat across entries).
       if (nb == 0) {
         split("", have)
         for (i = 1; i <= no; i++) { print o[i]; have[o[i]] = 1 }
-        for (i = 1; i <= nt; i++) if (t[i] ~ /^[[:space:]]*$/ || !(t[i] in have)) print t[i]
+        single = one_liners(o, no) && one_liners(t, nt)
+        for (i = 1; i <= nt; i++) if (!single || t[i] ~ /^[[:space:]]*$/ || !(t[i] in have)) print t[i]
         return 1
       }
       # One "Last updated" line changed on both sides — keep the newest.
@@ -463,6 +549,10 @@ resolve_hunks() {
       if (prefer == "theirs") { keep_markers(o, no, t, nt); for (i = 1; i <= nt; i++) print t[i]; print "hunk" >> used; return 1 }
       return 0
     }
+    function one_liners(arr, n,    i) {
+      for (i = 1; i <= n; i++) if (!(arr[i] ~ /^[[:space:]]*$/ || is_row(arr[i]) || is_item(arr[i]))) return 0
+      return 1
+    }
     function keep_markers(from, nf, into, ni,    i, j, has) {
       for (i = 1; i <= nf; i++) if (from[i] ~ /<!--[[:space:]]*map-merge:[[:space:]]*snapshot/) {
         has = 0; for (j = 1; j <= ni; j++) if (into[j] == from[i]) has = 1
@@ -475,7 +565,7 @@ resolve_hunks() {
       for (i = 1; i <= no; i++) print o[i]
       print mid_line
       for (i = 1; i <= nb; i++) print b[i]
-      print sep
+      print sep_line
       for (i = 1; i <= nt; i++) print t[i]
       print stop_line
     }
@@ -483,7 +573,7 @@ resolve_hunks() {
     BEGIN { start = marker("<") " "; mid = marker("|") " "; sep = marker("="); stop = marker(">") " "; state = 0 }
     state == 0 && index($0, start) == 1 { state = 1; no = nb = nt = 0; start_line = $0; next }
     state == 1 && index($0, mid) == 1 { state = 2; mid_line = $0; next }
-    state == 2 && $0 == sep { state = 3; next }
+    state == 2 && ($0 == sep || $0 == sep "\r") { state = 3; sep_line = $0; next } # CRLF files get CRLF markers
     state == 3 && index($0, stop) == 1 {
       stop_line = $0
       # merge_rows prints nothing until it knows it succeeds, so a failed
@@ -698,7 +788,8 @@ awk -F'\t' '
   FILENAME == ARGV[2] { if (!($2 in blank)) blank[$2] = $3; next }
   {
     path = $1; key = substr($0, length(path) + 2)
-    if (started && last != "" && blank[key] == 1) print ""
+    l = last; crlf = sub(/\r$/, "", l)
+    if (started && l != "" && blank[key] == 1) print (crlf ? "\r" : "")
     while ((getline line < path) > 0) { print line; last = line; started = 1 }
     close(path)
   }

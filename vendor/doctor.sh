@@ -4,7 +4,9 @@
 # Mirrors src/Doctor.php's check()/fix() split and the same hard rule: --fix
 # only ever adds content (missing files, missing gitignore/gitattributes
 # entries, a safe copilot-instructions.md regeneration) — it never removes or
-# rewrites a line a developer could have written. Anything else is reported
+# rewrites a line a developer could have written. The one removal is the
+# .gitattributes lines MAP itself wrote in earlier versions (lib.sh's
+# LEGACY_GITATTRIBUTES_BLOCK), matched exactly. Anything else is reported
 # only, for a human to merge by hand.
 # Usage: ./doctor.sh <target-project-path> [--fix]
 # Run from the map-ai repo root.
@@ -424,7 +426,7 @@ apply_fixable_hunks() {
   done
 
   local file_lines=()
-  mapfile -t file_lines < "$target"
+  read_lines file_lines < "$target"
 
   local idx start cnt add_body add_lines
   for idx in "${order[@]}"; do
@@ -432,14 +434,25 @@ apply_fixable_hunks() {
     cnt=${FH_COUNTS[$idx]}
     add_body=${FH_BODIES[$idx]}
     add_lines=()
-    mapfile -t add_lines <<< "$add_body"
-    if [[ ${#add_lines[@]} -gt 0 && -z "${add_lines[-1]}" ]]; then
-      unset 'add_lines[-1]'
+    read_lines add_lines <<< "$add_body"
+    if [[ ${#add_lines[@]} -gt 0 && -z "${add_lines[${#add_lines[@]} - 1]}" ]]; then
+      unset "add_lines[$((${#add_lines[@]} - 1))]"
     fi
     file_lines=("${file_lines[@]:0:$start}" "${add_lines[@]}" "${file_lines[@]:$((start + cnt))}")
   done
 
   printf '%s\n' "${file_lines[@]}" > "$target"
+}
+
+# Reads stdin into the array named $1, one element per line — bash 3.2 (stock
+# macOS) has no mapfile. A trailing line without a newline still counts.
+read_lines() {
+  local __line __i=0
+  eval "$1=()"
+  while IFS= read -r __line || [[ -n "$__line" ]]; do
+    eval "$1[\$__i]=\$__line"
+    __i=$((__i + 1))
+  done
 }
 
 # Splices only the appliable hunks from $1 (target) vs $2 (stub) into $1, in
@@ -472,9 +485,9 @@ render_fixable_hunks() {
   for idx in "${order[@]}"; do
     add_body=${FH_BODIES[$idx]}
     add_lines=()
-    mapfile -t add_lines <<< "$add_body"
-    if [[ ${#add_lines[@]} -gt 0 && -z "${add_lines[-1]}" ]]; then
-      unset 'add_lines[-1]'
+    read_lines add_lines <<< "$add_body"
+    if [[ ${#add_lines[@]} -gt 0 && -z "${add_lines[${#add_lines[@]} - 1]}" ]]; then
+      unset "add_lines[$((${#add_lines[@]} - 1))]"
     fi
     for line in "${add_lines[@]}"; do
       echo "    + $line"
@@ -524,7 +537,8 @@ fi
 # ---------------------------------------------------------------------------
 # --interactive: same fixable set as --fix, but confirmed one file at a time.
 # Missing files/gitignore/gitattributes entries have no existing content they
-# could touch, so those are still applied unattended via install.sh — only
+# could touch (beyond MAP's own legacy .gitattributes lines), so those are still
+# applied unattended via install.sh — only
 # modifications to a file that already exists get a confirm gate, one prompt
 # per file showing all of that file's hunks together (not one prompt per
 # hunk), matching map-ai-laravel's InstallCommand review UX.

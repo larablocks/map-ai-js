@@ -107,7 +107,9 @@ GITIGNORE_GROUP_3=("docs/MEMORY.md" "docs/memory/*.md" "!docs/memory/*.example.m
 # table rows, bumping "Last updated", picking the same next BUG-N), then
 # offers Claude what's left — always stopping for review. Covers every file
 # an AI agent writes to, including the ones it only edits with approval
-# (DESIGN/DOCKER/SETUP/COMPLIANCE, AGENTS.md and the other entry points).
+# (DESIGN/DOCKER/SETUP/COMPLIANCE, AGENTS.md and the other entry points). The
+# entry points are anchored with a leading "/" — a bare "AGENTS.md" would also
+# match nested or vendored copies anywhere in the tree.
 # Mirrors Installer::GITATTRIBUTES_ENTRIES.
 GITATTRIBUTES_HEADER="# MAP — structured markdown merge driver (.map/merge.sh, registered per clone)"
 GITATTRIBUTES_BLOCK=(
@@ -133,18 +135,20 @@ GITATTRIBUTES_BLOCK=(
   "docs/DOCKER.md merge=map-ai"
   "docs/SETUP.md merge=map-ai"
   "docs/COMPLIANCE.md merge=map-ai"
-  "AGENTS.md merge=map-ai"
-  "CLAUDE.md merge=map-ai"
-  "GEMINI.md merge=map-ai"
+  "/AGENTS.md merge=map-ai"
+  "/CLAUDE.md merge=map-ai"
+  "/GEMINI.md merge=map-ai"
   ".github/copilot-instructions.md merge=map-ai"
   ".claude/rules/*.md merge=map-ai"
 )
 
-# Lines earlier MAP versions wrote. merge=union kept every line from both
-# sides, which resurrected bugs one branch had moved to BUGS_ARCHIVE.md —
-# removed on install now that merge=map-ai replaces them. Mirrors
-# Installer::LEGACY_GITATTRIBUTES_ENTRIES.
+# Lines earlier MAP versions (up to 0.1.9) wrote, header comment included.
+# merge=union kept every line from both sides, which resurrected bugs one
+# branch had moved to BUGS_ARCHIVE.md — removed on install now that
+# merge=map-ai replaces them. The only lines install/fix ever remove, and only
+# as exact matches. Mirrors Installer::LEGACY_GITATTRIBUTES_ENTRIES.
 LEGACY_GITATTRIBUTES_BLOCK=(
+  "# MAP — merge-friendly append-only logs"
   "docs/BUGS.md merge=union"
   "docs/BUGS_ARCHIVE.md merge=union"
   "docs/ARCHITECTURE_HISTORY.md merge=union"
@@ -156,7 +160,20 @@ LEGACY_GITATTRIBUTES_BLOCK=(
 # --fix and the SessionStart hook all do. Unregistered, git silently falls
 # back to its normal text merge for these files. Mirrors Installer::MERGE_DRIVER.
 MERGE_DRIVER_NAME="MAP structured markdown merge"
+# For a project at the root of its git repo — see merge_driver_command.
 MERGE_DRIVER_COMMAND='bash "$(git rev-parse --show-toplevel)/.map/merge.sh" %O %A %B %P'
+
+# The driver command for the project at $1. git runs drivers from the repo
+# root, so a project in a subdirectory (a monorepo package) needs that prefix
+# in the path — without it the command fails and git leaves only our side of
+# the file. Mirrors Installer::mergeDriverCommand().
+merge_driver_command() {
+  local prefix
+  prefix="$(git -C "$1" rev-parse --show-prefix 2>/dev/null || true)"
+  # Split rather than ${var/pattern/...}: bash 3.2 keeps the backslashes of
+  # escaped slashes in the replacement.
+  printf '%s\n' "${MERGE_DRIVER_COMMAND%%.map/merge.sh*}${prefix}.map/merge.sh${MERGE_DRIVER_COMMAND#*.map/merge.sh}"
+}
 
 # True if $1 is inside a git work tree.
 is_git_repo() {
@@ -165,12 +182,12 @@ is_git_repo() {
 
 # True if $1's clone already has the MAP merge driver registered exactly.
 merge_driver_registered() {
-  [[ "$(git -C "$1" config --get merge.map-ai.driver 2>/dev/null)" == "$MERGE_DRIVER_COMMAND" ]]
+  [[ "$(git -C "$1" config --get merge.map-ai.driver 2>/dev/null)" == "$(merge_driver_command "$1")" ]]
 }
 
 register_merge_driver() {
   git -C "$1" config merge.map-ai.name "$MERGE_DRIVER_NAME" &&
-    git -C "$1" config merge.map-ai.driver "$MERGE_DRIVER_COMMAND"
+    git -C "$1" config merge.map-ai.driver "$(merge_driver_command "$1")"
 }
 
 # Strips CRLF and surrounding whitespace from each line of $1 so a line
