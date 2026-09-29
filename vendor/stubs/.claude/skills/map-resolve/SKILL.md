@@ -16,7 +16,7 @@ _Pairs with .map/merge.sh, the git merge driver .gitattributes routes these file
 1. List what is unmerged: `git diff --name-only --diff-filter=U`. Only handle the MAP files (the ones `.gitattributes` marks `merge=map-ai`); tell the developer about any others and leave them alone.
 2. Sort each MAP file into one of two groups by whether it still contains conflict markers (`grep -c '^<<<<<<< ' <file>`):
    - **Has markers** → go to step 3.
-   - **No markers, still unmerged** → the merge driver already resolved it with Claude and paused for review. Go to step 5.
+   - **No markers, still unmerged** → the merge driver paused it for review: either it resolved the conflicts with Claude, or (in `docs/BUGS.md` / `docs/BUGS_ARCHIVE.md`) the same BUG-N now has two entries because both branches handled that bug. The merge output says which. For a duplicate bug, keep one entry or combine them. Go to step 5.
 3. If `merge.map-ai` wasn't registered when the merge ran (`git config --get merge.map-ai.driver` is empty), apply MAP's deterministic rules first: `MAP_MERGE_LLM=0 bash .map/merge.sh --resolve <file>`. It re-merges from git's index stages and leaves markers only around what the rules can't settle. It never runs `git add`.
 4. Resolve each remaining conflict hunk yourself:
    - Read the file's header lines (the italic `_..._` rules at the top) and follow them — append-only logs never lose entries, "Last updated" takes the newest date, BUG-N numbers are never reused.
@@ -27,7 +27,7 @@ _Pairs with .map/merge.sh, the git merge driver .gitattributes routes these file
    - Recent intent helps: `git log --oneline -5 MERGE_HEAD -- <file>` (or `REBASE_HEAD` / `CHERRY_PICK_HEAD`) and `git log --oneline -5 HEAD -- <file>`.
 5. Review every resolved file with the developer: show `git diff <file>` (the combined diff against both sides) and summarise, per conflict, what was kept from each side and why. To start a file over from the raw conflict: `git checkout --conflict=diff3 -- <file>`.
 6. Only after the developer confirms, `git add <file>`. Never run `git commit`, `git merge --continue`, or `git rebase --continue` yourself unless the developer explicitly asks.
-7. If the merge renumbered a duplicate BUG-N (the output says "renumbered one to BUG-…"), update references to the old number in `docs/qa/*.md` and mention it.
+7. If the merge renumbered a duplicate BUG-N (the output says "renumbered … to BUG-…"), update references to the old number in `docs/qa/*.md` and mention it. After the merge, `bash .map/merge.sh --check-bugs` catches a BUG-N clash git never ran the driver on (one branch changed only `docs/BUGS.md`, the other only `docs/BUGS_ARCHIVE.md`).
 
 ## Supporting files
 - `.map/merge.sh` — the merge driver; `--resolve <file>` re-runs it on an already-conflicted file (see its header for the rules and the `MAP_MERGE_*` settings)

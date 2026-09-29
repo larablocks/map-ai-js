@@ -629,6 +629,18 @@ if is_git_repo "$TARGET" && ! merge_driver_registered "$TARGET"; then
   ((FIXABLE_FOUND++)) || true
 fi
 
+# Mirrors Doctor.php's duplicate-bug-number — a BUG-N used twice across the two
+# bug files, which git never routes through the merge driver when each branch
+# only touched one of them. Review-only: whether the two entries are the same
+# bug is a judgement call.
+if [[ -f "$TARGET/docs/BUGS.md" || -f "$TARGET/docs/BUGS_ARCHIVE.md" ]]; then
+  while IFS= read -r dupe; do
+    [[ -n "$dupe" ]] || continue
+    echo "  [REVIEW]   duplicate-bug-number     $dupe is used twice in docs/BUGS.md / docs/BUGS_ARCHIVE.md  (different bugs: bash .map/merge.sh --fix-bugs, then fix docs/qa references; same bug: remove the stale entry)"
+    ((REVIEW_FOUND++)) || true
+  done < <( (cd "$TARGET" && bash "$SCRIPT_DIR/stubs/.map/merge.sh" --check-bugs 2>/dev/null) | sed -n 's/^map-merge: \(BUG-[0-9]*\) is used twice.*/\1/p' | sort -u)
+fi
+
 if COPILOT_REGENERATED="$(regenerate_copilot "$TARGET")"; then
   COPILOT_PATH="$TARGET/.github/copilot-instructions.md"
   COPILOT_CURRENT=""

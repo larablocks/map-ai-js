@@ -13,9 +13,13 @@ _Distinct from a coverage gap (docs/TESTING_COVERAGE.md `[none]`/`[partial]` row
      one that was already on your side keeps it and the other is renumbered to the next free
      number (the merge prints which). After such a renumber, fix any references to the old number
      in docs/qa/*.md. Anything it can't resolve safely — the same bug edited differently on both
-     branches — is left as a normal conflict. If numbering ever needs a clean reset instead of a
-     per-entry rename, append a dated "### Numbering note — YYYY-MM-DD" entry under Open bugs
-     stating the next unused number explicitly, so future scans don't have to recount from history. -->
+     branches, or archived on both — is left for review. Git only runs the driver on a file both
+     branches changed, so a clash between one branch's BUGS.md and the other's BUGS_ARCHIVE.md
+     is caught afterwards instead: `bash .map/merge.sh --check-bugs` (run by the SessionStart hook
+     and doctor) lists it, `bash .map/merge.sh --fix-bugs` renumbers the copy in this file.
+     If numbering ever needs a clean reset instead of a per-entry rename, append a dated
+     "### Numbering note — YYYY-MM-DD" entry under Open bugs stating the next unused number
+     explicitly, so future scans don't have to recount from history. -->
 
 ## Open bugs
 <!-- BUG-N: if a dated "### Numbering note" entry exists below, use the number it states as the next available and skip the recount; otherwise scan BOTH this file and docs/BUGS_ARCHIVE.md for the highest existing number and increment by 1 — numbers are permanent, never reused -->

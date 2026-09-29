@@ -18,13 +18,18 @@
 #
 # How a file is resolved — never worse than plain git:
 # 1. git's own 3-way merge. Clean → that exact result (plus BUG-N
-#    de-duplication for the bug files). It's also written to %A up front, so
-#    any failure below still leaves git's normal conflict output behind.
+#    de-duplication for the bug files), provided every entry (block, below)
+#    that neither side changed is unchanged and every entry one side changed
+#    matches that side — git matches identical lines, and MAP entries repeat
+#    the same field lines, so a "clean" merge can land an edit in the wrong
+#    entry. Otherwise it falls through to 2. It's also written to %A up front,
+#    so any failure below still leaves git's normal conflict output behind.
 # 2. Rules, no LLM. Split each side into blocks at markdown headings (not
 #    inside code fences or HTML comments) and 3-way merge block by block.
 #    Inside a block changed on both sides, only these hunk shapes resolve:
 #      - table rows only       → 3-way merge keyed by first cell
-#      - list items only       → 3-way merge keyed by item text: removals on
+#      - list items only       → 3-way merge keyed by item text (one-line
+#                                dated entries count as items): removals on
 #                                either side stay removed, additions kept
 #                                (ours, then theirs), numbered lists renumbered;
 #                                items both kept must keep their order
@@ -54,7 +59,18 @@
 # 4. docs/BUGS.md and docs/BUGS_ARCHIVE.md: a BUG-N heading that now appears
 #    twice (both branches picked the same next number) keeps its number on
 #    the entry that was already on our side; the other gets the next free
-#    number across both bug files on both branches.
+#    number across both bug files on both branches. Same for a new BUG-N of
+#    theirs that our side already used in the other bug file. A number that
+#    already existed at the merge base is one bug both branches handled — not
+#    renumbered; the merge stops for review instead.
+#
+# Also: merge.sh --check-bugs lists BUG-N headings used twice across
+# docs/BUGS.md and docs/BUGS_ARCHIVE.md (exit 1 if any) — git only runs a
+# merge driver on a file both sides changed, so a clash between one branch's
+# BUGS.md and the other's BUGS_ARCHIVE.md never reaches the driver; the
+# SessionStart hook and doctor run this after the fact. merge.sh --fix-bugs
+# renumbers the later copy (BUGS.md before the archive, which is never
+# edited) to the next free number.
 #
 # Written for bash 3.2 + POSIX awk — git runs this on every merge, including
 # on stock macOS.
@@ -63,6 +79,51 @@ MARKER_SIZE=7
 
 TMP="$(mktemp -d 2>/dev/null || mktemp -d -t map-merge)"
 trap 'rm -rf "$TMP"' EXIT
+
+if [[ "${1:-}" == "--check-bugs" || "${1:-}" == "--fix-bugs" ]]; then
+  cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" || exit 2
+  FIX=0; [[ "$1" == "--fix-bugs" ]] && FIX=1
+  files=()
+  for f in docs/BUGS_ARCHIVE.md docs/BUGS.md; do [[ -f "$f" ]] && files+=("$f"); done
+  (( ${#files[@]} )) || exit 0
+  # Archive first: its entries are permanent, so the copy in BUGS.md (or the
+  # later one within a file) is the one that moves.
+  awk -v fix="$FIX" -v tmp="$TMP" '
+    function in_code(line) {
+      if (line ~ /^[[:space:]]*(```|~~~)/) { fence = !fence; return 1 }
+      if (fence) return 1
+      if (comment) { if (line ~ /-->/) comment = 0; return 1 }
+      if (line ~ /<!--/ && line !~ /-->/) { comment = 1; return 1 }
+      return 0
+    }
+    FNR == 1 { fence = 0; comment = 0; file[++nf] = FILENAME }
+    {
+      lines[FILENAME, FNR] = $0; count[FILENAME] = FNR
+      n = split($0, parts, /BUG-/)
+      for (i = 2; i <= n; i++) if (match(parts[i], /^[0-9]+/)) { v = substr(parts[i], 1, RLENGTH) + 0; if (v > max) max = v }
+      if (!in_code($0) && match($0, /^#+[[:space:]]+BUG-[0-9]+/)) {
+        b = substr($0, 1, RLENGTH); sub(/^#+[[:space:]]+BUG-/, "", b); b += 0
+        if (b in first) {
+          dup = 1
+          printf "map-merge: BUG-%d is used twice — %s and %s: \"%s\"\n", b, first[b], FILENAME, $0
+          if (fix) {
+            max++; line = $0; sub("BUG-" b, "BUG-" max, line); lines[FILENAME, FNR] = line; changed[FILENAME] = 1
+            printf "map-merge: renumbered it to BUG-%d in %s — update any references to it (e.g. docs/qa/*.md)\n", max, FILENAME
+          }
+        } else first[b] = FILENAME
+      }
+    }
+    END {
+      for (k = 1; k <= nf; k++) if (file[k] in changed) {
+        out = tmp "/fixed-" k
+        for (i = 1; i <= count[file[k]]; i++) print lines[file[k], i] > out
+        close(out); system("cp \"" out "\" \"" file[k] "\"")
+      }
+      exit (dup && !fix) ? 1 : 0
+    }
+  ' "${files[@]}"
+  exit $?
+fi
 
 RESOLVE_MODE=0
 if [[ "${1:-}" == "--resolve" ]]; then
@@ -113,19 +174,58 @@ is_bug_file() {
   return 1
 }
 
+# The commit being merged in and the 3-way base, as "<theirs> <base>".
+# MERGE_HEAD/REBASE_HEAD don't exist yet while git runs a merge driver, so:
+# a merge exports GITHEAD_<sha>; a rebase has just logged "pick <sha>" in
+# rebase-merge/done (base = its parent). Anything else (a single
+# cherry-pick) prints nothing.
+incoming_commit() {
+  local sha done_file
+  sha="$(env | sed -n 's/^GITHEAD_\([0-9a-f]\{7,\}\)=.*/\1/p' | head -n 1)"
+  if [[ -n "$sha" ]]; then
+    echo "$sha $(git merge-base HEAD "$sha" 2>/dev/null | head -n 1)"
+    return
+  fi
+  done_file="$(git rev-parse --git-path rebase-merge/done 2>/dev/null)"
+  if [[ -s "$done_file" ]]; then
+    sha="$(tail -n 1 "$done_file" | awk '{ print $2 }')"
+    git rev-parse -q --verify "$sha^{commit}" >/dev/null 2>&1 && echo "$sha $(git rev-parse -q --verify "$sha^" 2>/dev/null)"
+  fi
+}
+
 renumber_bugs() {
-  local file="$1" extra="$TMP/bug-numbers" ref f
+  local file="$1" extra="$TMP/bug-numbers" ref f incoming theirs_ref="" base_ref=""
+  incoming="$(incoming_commit)"
+  if [[ -n "$incoming" ]]; then theirs_ref="${incoming%% *}"; base_ref="${incoming#* }"; fi
   : > "$extra"
   for f in docs/BUGS.md docs/BUGS_ARCHIVE.md; do
     [[ -f "$f" ]] && cat "$f" >> "$extra"
-    for ref in HEAD MERGE_HEAD REBASE_HEAD; do
+    for ref in HEAD $theirs_ref; do
       git show "$ref:$f" >> "$extra" 2>/dev/null || true
     done
   done
   cat "$TMP/ours" "$TMP/theirs" "$TMP/base" >> "$extra"
   cp "$file" "$TMP/to-count" # distinct name, so awk can tell the counting pass from the rewrite pass
 
-  awk -v path="$TARGET_PATH" '
+  # Numbers our side already uses in the other bug file that weren't there at
+  # the merge base — e.g. we found BUG-3 and archived it straight away while
+  # they opened a different BUG-3. Their heading with that number is renumbered.
+  local other cross=""
+  case "$TARGET_PATH" in
+    *BUGS_ARCHIVE.md) other="${TARGET_PATH%BUGS_ARCHIVE.md}BUGS.md" ;;
+    *) other="${TARGET_PATH%BUGS.md}BUGS_ARCHIVE.md" ;;
+  esac
+  heading_numbers() { grep -oE '^#+[[:space:]]+BUG-[0-9]+' | grep -oE '[0-9]+$' | sort -u; }
+  { [[ -n "$base_ref" ]] && git show "$base_ref:$other" 2>/dev/null; cat "$TMP/base"; } | heading_numbers > "$TMP/base-numbers"
+  if [[ -n "$base_ref" ]]; then
+    cross="$(git show "HEAD:$other" 2>/dev/null | heading_numbers | grep -vxF -f "$TMP/base-numbers" | tr '\n' ' ')"
+  fi
+  : > "$TMP/same-bug"
+
+  # A number that existed at the merge base and now has two entries is one bug
+  # both branches handled (e.g. both fixed and archived it) — renumbering would
+  # invent a bug, so that's left for review: returns 1.
+  awk -v path="$TARGET_PATH" -v other="$other" -v cross="$cross" -v basenums="$(tr '\n' ' ' < "$TMP/base-numbers")" -v same="$TMP/same-bug" '
     function in_code(line) {
       if (line ~ /^[[:space:]]*(```|~~~)/) { fence = !fence; return 1 }
       if (fence) return 1
@@ -138,6 +238,10 @@ renumber_bugs() {
         s = substr(line, 1, RLENGTH); sub(/^#+[[:space:]]+BUG-/, "", s); return s + 0
       }
       return -1
+    }
+    BEGIN {
+      n = split(cross, c, " "); for (i = 1; i <= n; i++) taken[c[i] + 0] = 1
+      n = split(basenums, c, " "); for (i = 1; i <= n; i++) at_base[c[i] + 0] = 1
     }
     FNR == 1 { fence = 0; comment = 0 }
     # Pass 1: every number ever used, anywhere, for "next free".
@@ -157,7 +261,16 @@ renumber_bugs() {
       line = $0
       if (!in_code(line)) {
         b = bug_number(line)
-        if (b >= 0 && count[b] > 1) {
+        if (b >= 0 && (b in taken) && !(line in ours_heading)) {
+          max++
+          sub("BUG-" b, "BUG-" max, line)
+          printf "map-merge: %s got BUG-%d from the other branch, but your side already uses BUG-%d in %s — renumbered theirs to BUG-%d; update any references to it (e.g. docs/qa/*.md)\n", path, b, b, other, max > "/dev/stderr"
+        } else if (b >= 0 && count[b] > 1 && (b in at_base)) {
+          if (!(b in reported)) {
+            reported[b] = 1; print b >> same
+            printf "map-merge: %s has BUG-%d twice — it existed before the branches split, so both handled the same bug. Keep one entry (or combine them), then git add.\n", path, b > "/dev/stderr"
+          }
+        } else if (b >= 0 && count[b] > 1) {
           if (!(b in keeper)) keeper[b] = line
           if (line != keeper[b] || (b in kept)) {
             max++
@@ -171,6 +284,7 @@ renumber_bugs() {
       print line
     }
   ' "$extra" "$TMP/ours" "$TMP/to-count" "$file" > "$TMP/renumbered" && cp "$TMP/renumbered" "$file"
+  [[ ! -s "$TMP/same-bug" ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -186,11 +300,8 @@ if (( STATUS < 0 || STATUS > 127 )); then
 fi
 
 cp "$TMP/standard" "$OURS"
-
-if (( STATUS == 0 )); then
-  is_bug_file && renumber_bugs "$OURS"
-  finish 0
-fi
+# A clean result is only used once it passes the entry check below (after the
+# block helpers are defined).
 
 # ---------------------------------------------------------------------------
 # Step 2 — rules.
@@ -237,10 +348,6 @@ split_blocks() {
     }
     END { if (out != "") close(out); close(dir "/index") }
   ' "$1"
-}
-
-block_id() { # $1 = side dir, $2 = key → prints the block id or nothing
-  K="$2" awk -F'\t' '$2 == ENVIRON["K"] { print $1; exit }' "$1/index"
 }
 
 # Resolves the safe-shaped conflict hunks of a --diff3 merge-file output on
@@ -295,14 +402,16 @@ resolve_hunks() {
     }
 
     # List items only (one list, one indent): 3-way merge keyed by item text.
-    # An item removed on either side stays removed; items added on either side
-    # are kept, ours then theirs; numbered items are renumbered. Items kept by
-    # both sides must keep their relative order — a reprioritised list is a
-    # real conflict.
+    # One-line dated entries ("2026-09-10 — ...", as in memory/shared.md)
+    # count as items too. An item removed on either side stays removed; items
+    # added on either side are kept, ours then theirs; numbered items are
+    # renumbered. Items kept by both sides must keep their relative order — a
+    # reprioritised list is a real conflict.
     function item_prefix(line) { return match(line, /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+/) ? substr(line, 1, RLENGTH) : "" }
+    function is_item(line) { return item_prefix(line) != "" || line ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][[:space:]]/ }
     function indent_of(line) { match(line, /^[[:space:]]*/); return RLENGTH }
     function all_items(arr, n, ind,    i) {
-      for (i = 1; i <= n; i++) if (item_prefix(arr[i]) == "" || indent_of(arr[i]) != ind) return 0
+      for (i = 1; i <= n; i++) if (!is_item(arr[i]) || indent_of(arr[i]) != ind) return 0
       return 1
     }
     function item_keys(arr, n, keys, set,    i, k, occ) {
@@ -421,61 +530,118 @@ newer_side() { # $1 = ours block, $2 = theirs block → "ours" or "theirs" (ours
 split_blocks "$TMP/ours" "$TMP/A"
 split_blocks "$TMP/base" "$TMP/O"
 split_blocks "$TMP/theirs" "$TMP/B"
+
+# Joins the block indexes of the side dirs given (after $1) by heading key, in
+# first-seen order across them, as one line per key:
+#   key <TAB> id per side <TAB> content class per side
+# "-" marks a side without that block. Blocks with equal content get equal
+# class numbers, so callers compare sides without reading files. $1 = 1 to
+# ignore trailing blank lines when comparing. One awk pass instead of a
+# lookup, cmp and cp per block — archives run to hundreds of entries.
+join_blocks() {
+  local strip="$1" d; shift
+  local indexes=()
+  for d in "$@"; do indexes+=("$d/index"); done
+  awk -F'\t' -v strip="$strip" -v sides="$#" '
+    FNR == 1 { side++; dir[side] = FILENAME; sub(/\/index$/, "", dir[side]) }
+    { if (!($2 in known)) { known[$2] = 1; keys[++count] = $2 }; id[side, $2] = $1 }
+    function content(path,    s, pending, line) {
+      s = ""; pending = ""
+      while ((getline line < path) > 0) {
+        if (line ~ /^[[:space:]]*$/) { pending = pending line "\n"; continue }
+        s = s pending line "\n"; pending = ""
+      }
+      close(path)
+      return strip ? s : s pending
+    }
+    END {
+      for (i = 1; i <= count; i++) {
+        k = keys[i]; ids = ""; classes = ""; split("", class); n = 0
+        for (sd = 1; sd <= sides; sd++) {
+          if ((sd, k) in id) {
+            c = content(dir[sd] "/" id[sd, k])
+            if (!(c in class)) class[c] = ++n
+            ids = ids "\t" id[sd, k]; classes = classes "\t" class[c]
+          } else { ids = ids "\t-"; classes = classes "\t-" }
+        }
+        print k ids classes
+      }
+    }
+  ' "${indexes[@]}"
+}
+
+# git's line merge matches identical lines, and MAP entries repeat the same
+# field lines ("- **Status:** open"), so a "clean" merge can land one side's
+# edit in a neighbouring entry nobody touched. Trust it only if every entry
+# neither side changed comes out unchanged, and every entry one side changed
+# comes out as that side's version; otherwise fall through to the rules.
+git_merge_is_trustworthy() {
+  local key a o b r ca co cb cr
+  split_blocks "$TMP/standard" "$TMP/S"
+  while IFS=$'\t' read -r key a o b r ca co cb cr; do
+    [[ "$a" != - && "$b" != - && "$o" != - ]] || continue
+    if [[ "$ca" == "$co" ]]; then [[ "$cr" == "$cb" ]] || return 1   # only they changed it (or nobody)
+    elif [[ "$cb" == "$co" ]]; then [[ "$cr" == "$ca" ]] || return 1 # only we changed it
+    fi # both changed it — git's merge of the two is as good as any
+  done < <(join_blocks 1 "$TMP/A" "$TMP/O" "$TMP/B" "$TMP/S")
+  return 0
+}
+
+if (( STATUS == 0 )); then
+  if git_merge_is_trustworthy; then
+    if is_bug_file && ! renumber_bugs "$OURS"; then finish 1; fi
+    finish 0
+  fi
+  echo "map-merge: $TARGET_PATH — git's line merge moved an edit into an entry neither branch changed; merging entry by entry instead." >&2
+fi
 FILE_SNAPSHOT=0
 for f in "$TMP/ours" "$TMP/theirs"; do
   awk '/^##+[[:space:]]/ { exit } { print }' "$f" > "$TMP/file-head"
   if is_snapshot "$TMP/file-head"; then FILE_SNAPSHOT=1; fi
 done
 mkdir -p "$TMP/R"
-: > "$TMP/R/index"
+: > "$TMP/R/index" # "<path of the block's result><TAB>key" per kept block
 : > "$TMP/empty"
 
 conflict=0
 n=0
-while IFS= read -r key; do
-  a="$(block_id "$TMP/A" "$key")"
-  o="$(block_id "$TMP/O" "$key")"
-  b="$(block_id "$TMP/B" "$key")"
+while IFS=$'\t' read -r key a o b ca co cb; do
   fa="$TMP/A/$a"; fo="$TMP/O/$o"; fb="$TMP/B/$b"
-  [[ -n "$a" ]] || fa="$TMP/empty"
-  [[ -n "$o" ]] || fo="$TMP/empty"
-  [[ -n "$b" ]] || fb="$TMP/empty"
+  if [[ "$a" == - ]]; then a=""; fa="$TMP/empty"; fi
+  if [[ "$o" == - ]]; then o=""; fo="$TMP/empty"; fi
+  if [[ "$b" == - ]]; then b=""; fb="$TMP/empty"; fi
 
   n=$((n + 1))
-  id="$(printf '%04d' "$n")"
-  out="$TMP/R/$id"
-  keep=1
+  printf -v out '%s/R/%04d' "$TMP" "$n"
+  keep=""
 
   if [[ -z "$a" && -z "$b" ]]; then
-    keep=0 # deleted on both sides
-  elif [[ -n "$a" && -n "$b" ]] && cmp -s "$fa" "$fb"; then
-    cp "$fa" "$out"
+    : # deleted on both sides
+  elif [[ -n "$a" && -n "$b" && "$ca" == "$cb" ]]; then
+    keep="$fa"
   elif [[ -n "$o" && -z "$a" ]]; then
-    if cmp -s "$fb" "$fo"; then
-      keep=0 # we deleted it, they didn't touch it
-    else
-      conflict_hunk "$fa" "$fo" "$fb" > "$out"; conflict=1 # we deleted it, they edited it
-    fi
+    if [[ "$cb" != "$co" ]]; then
+      conflict_hunk "$fa" "$fo" "$fb" > "$out"; conflict=1; keep="$out" # we deleted it, they edited it
+    fi # else: we deleted it, they didn't touch it
   elif [[ -n "$o" && -z "$b" ]]; then
-    if cmp -s "$fa" "$fo"; then
-      keep=0
-    else
-      conflict_hunk "$fa" "$fo" "$fb" > "$out"; conflict=1
+    if [[ "$ca" != "$co" ]]; then
+      conflict_hunk "$fa" "$fo" "$fb" > "$out"; conflict=1; keep="$out"
     fi
-  elif [[ -n "$o" ]] && cmp -s "$fa" "$fo"; then
-    cp "$fb" "$out"
-  elif [[ -n "$o" ]] && cmp -s "$fb" "$fo"; then
-    cp "$fa" "$out"
+  elif [[ -n "$o" && "$ca" == "$co" ]]; then
+    keep="$fb"
+  elif [[ -n "$o" && "$cb" == "$co" ]]; then
+    keep="$fa"
   elif [[ -z "$o" && -z "$b" ]]; then
-    cp "$fa" "$out" # new on our side only
+    keep="$fa" # new on our side only
   elif [[ -z "$o" && -z "$a" ]]; then
-    cp "$fb" "$out" # new on their side only
+    keep="$fb" # new on their side only
   elif [[ -z "$o" ]]; then
     # Both sides added a block with the same heading (e.g. two sessions logging
     # the same date) — keep both entries whole rather than interleave them.
-    cat "$fa" "$fb" > "$out"
+    cat "$fa" "$fb" > "$out"; keep="$out"
   else
     # Changed on both sides.
+    keep="$out"
     git merge-file -p --diff3 --marker-size="$MARKER_SIZE" -L ours -L base -L theirs \
       "$fa" "$fo" "$fb" > "$out.merged"
     st=$?
@@ -497,10 +663,10 @@ while IFS= read -r key; do
     fi
   fi
 
-  if (( keep )); then
-    printf '%s\t%s\n' "$id" "$key" >> "$TMP/R/index"
+  if [[ -n "$keep" ]]; then
+    printf '%s\t%s\n' "$keep" "$key" >> "$TMP/R/index"
   fi
-done < <(cut -f2 "$TMP/A/index" "$TMP/O/index" "$TMP/B/index" | awk '!seen[$0]++')
+done < <(join_blocks 0 "$TMP/A" "$TMP/O" "$TMP/B")
 
 # Order: our blocks in our order; each block only they have goes right after
 # the nearest block preceding it on their side — and after any new blocks of
@@ -525,20 +691,18 @@ awk -F'\t' '
   END { for (i = 1; i <= n; i++) print res[out[i]] "\t" out[i] }
 ' "$TMP/R/index" "$TMP/order-a" "$TMP/theirs-keys" "$TMP/order-b" > "$TMP/order"
 
-blank_before() { # $1 = key → true if a blank line preceded it on its own side
-  local flag
-  flag="$(K="$1" awk -F'\t' '$2 == ENVIRON["K"] { print $3; exit }' "$TMP/A/index")"
-  [[ -n "$flag" ]] || flag="$(K="$1" awk -F'\t' '$2 == ENVIRON["K"] { print $3; exit }' "$TMP/B/index")"
-  [[ "$flag" == "1" ]]
-}
-
-: > "$TMP/result"
-while IFS=$'\t' read -r id key; do
-  if [[ -s "$TMP/result" && -n "$(tail -n 1 "$TMP/result")" ]] && blank_before "$key"; then
-    echo >> "$TMP/result"
-  fi
-  cat "$TMP/R/$id" >> "$TMP/result"
-done < "$TMP/order"
+# Assemble. A blank line goes between blocks when one preceded the block on
+# its own side (ours, else theirs) and the result doesn't already end blank.
+awk -F'\t' '
+  FILENAME == ARGV[1] { blank[$2] = $3; next }
+  FILENAME == ARGV[2] { if (!($2 in blank)) blank[$2] = $3; next }
+  {
+    path = $1; key = substr($0, length(path) + 2)
+    if (started && last != "" && blank[key] == 1) print ""
+    while ((getline line < path) > 0) { print line; last = line; started = 1 }
+    close(path)
+  }
+' "$TMP/A/index" "$TMP/B/index" "$TMP/order" > "$TMP/result"
 
 if [[ -s "$TMP/snapshot-used" ]]; then
   echo "map-merge: $TARGET_PATH — $(wc -l < "$TMP/snapshot-used" | tr -d ' ') snapshot value(s) changed on both branches; kept the newer side's. Neither branch measured the merged code, so re-verify them next session." >&2
@@ -546,7 +710,7 @@ fi
 
 if (( ! conflict )); then
   cp "$TMP/result" "$OURS"
-  is_bug_file && renumber_bugs "$OURS"
+  if is_bug_file && ! renumber_bugs "$OURS"; then finish 1; fi
   finish 0
 fi
 
