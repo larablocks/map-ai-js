@@ -7,6 +7,7 @@ _Fill in [N] and phase names when starting the project — Claude reads this eve
 [Remove or replace with your project's milestone/phase structure]
 
 ## Project health
+<!-- map-merge: snapshot — re-measured every session; on a merge conflict the newer side wins -->
 _Claude verifies build/test status by running commands — never assumes from last session_
 | Indicator | Status | Detail |
 |---|---|---|
@@ -27,6 +28,7 @@ _Project-level priorities — milestones and features, not individual session ta
 3. [Following task]
 
 ## Metrics snapshot
+<!-- map-merge: snapshot — re-measured every session; on a merge conflict the newer side wins -->
 _Trend is computed against the previous entry in docs/METRICS_HISTORY.md — that file is the leadership-facing history, this table is just the current snapshot._
 | Metric | Value | Trend |
 |---|---|---|

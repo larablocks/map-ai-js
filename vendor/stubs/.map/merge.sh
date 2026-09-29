@@ -24,8 +24,17 @@
 #    inside code fences or HTML comments) and 3-way merge block by block.
 #    Inside a block changed on both sides, only these hunk shapes resolve:
 #      - table rows only       → 3-way merge keyed by first cell
+#      - list items only       → 3-way merge keyed by item text: removals on
+#                                either side stay removed, additions kept
+#                                (ours, then theirs), numbered lists renumbered;
+#                                items both kept must keep their order
 #      - nothing in the base   → both sides only inserted: ours, then theirs
 #      - "Last updated" lines  → newest date
+#    Snapshot blocks (marked "<!-- map-merge: snapshot -->"; above the first
+#    ## heading it marks the whole file) hold values re-measured every session, so
+#    whatever's still conflicting there — a hunk, or a table row both sides
+#    changed — is taken from the side with the newer date (block, then file;
+#    ours on a tie) and reported, instead of stopping the merge.
 #    Everything the rules resolve is kept; conflict markers remain only around
 #    what they couldn't. All resolved → exit 0.
 # 3. Claude, for what's left. Each remaining conflict is sent to Claude with
@@ -236,9 +245,11 @@ block_id() { # $1 = side dir, $2 = key → prints the block id or nothing
 
 # Resolves the safe-shaped conflict hunks of a --diff3 merge-file output on
 # stdin and re-emits the rest verbatim, markers and all. Exits 1 if any hunk
-# was left unresolved.
+# was left unresolved. $1 = "ours"/"theirs" for a snapshot block: whatever the
+# other rules can't settle is taken from that (newer) side, and a line is
+# appended to $TMP/snapshot-used for each hunk or row that needed it.
 resolve_hunks() {
-  awk -v size="$MARKER_SIZE" '
+  awk -v size="$MARKER_SIZE" -v prefer="${1:-}" -v used="$TMP/snapshot-used" '
     function marker(ch,    m, i) { m = ""; for (i = 0; i < size; i++) m = m ch; return m }
     function is_row(line) { return line ~ /^[[:space:]]*\|/ }
     function all_rows(arr, n,    i) { for (i = 1; i <= n; i++) if (!is_row(arr[i])) return 0; return 1 }
@@ -255,26 +266,68 @@ resolve_hunks() {
       split("", occ); for (i = 1; i <= nb; i++) { k = row_key(b[i]); k = k SUBSEP (++occ[k]); rb[k] = b[i] }
       split("", occ); for (i = 1; i <= no; i++) { k = row_key(o[i]); k = k SUBSEP (++occ[k]); ro[k] = o[i]; order[++n] = k }
       split("", occ); for (i = 1; i <= nt; i++) { k = row_key(t[i]); k = k SUBSEP (++occ[k]); rt[k] = t[i]; if (!(k in ro)) order[++n] = k }
-      # Deleted on one side is only safe if the other side left the row unchanged.
-      for (k in rb) {
+      # Deleted on one side is only safe if the other side left the row
+      # unchanged — unless this is a snapshot block, where the newer side decides.
+      if (prefer == "") for (k in rb) {
         if ((k in ro) && !(k in rt) && ro[k] != rb[k]) return 0
         if ((k in rt) && !(k in ro) && rt[k] != rb[k]) return 0
       }
-      out_n = 0
+      out_n = 0; picked = 0
       for (i = 1; i <= n; i++) {
         k = order[i]; ino = (k in ro); inb = (k in rb); int_ = (k in rt)
         if (ino && int_) {
           if (ro[k] == rt[k]) out[++out_n] = ro[k]
           else if (inb && ro[k] == rb[k]) out[++out_n] = rt[k]
           else if (inb && rt[k] == rb[k]) out[++out_n] = ro[k]
+          else if (prefer != "") { out[++out_n] = (prefer == "theirs" ? rt[k] : ro[k]); picked++ }
           else return 0 # both changed (or both added) this row differently
         } else if (ino) {
           if (!inb) out[++out_n] = ro[k] # added on our side; else deleted by them, unchanged here
+          else if (ro[k] != rb[k]) { picked++; if (prefer == "ours") out[++out_n] = ro[k] } # changed here, deleted there
         } else if (int_) {
           if (!inb) out[++out_n] = rt[k]
+          else if (rt[k] != rb[k]) { picked++; if (prefer == "theirs") out[++out_n] = rt[k] }
         }
       }
       for (i = 1; i <= out_n; i++) print out[i]
+      for (i = 1; i <= picked; i++) print "row" >> used
+      return 1
+    }
+
+    # List items only (one list, one indent): 3-way merge keyed by item text.
+    # An item removed on either side stays removed; items added on either side
+    # are kept, ours then theirs; numbered items are renumbered. Items kept by
+    # both sides must keep their relative order — a reprioritised list is a
+    # real conflict.
+    function item_prefix(line) { return match(line, /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+/) ? substr(line, 1, RLENGTH) : "" }
+    function indent_of(line) { match(line, /^[[:space:]]*/); return RLENGTH }
+    function all_items(arr, n, ind,    i) {
+      for (i = 1; i <= n; i++) if (item_prefix(arr[i]) == "" || indent_of(arr[i]) != ind) return 0
+      return 1
+    }
+    function item_keys(arr, n, keys, set,    i, k, occ) {
+      split("", occ)
+      for (i = 1; i <= n; i++) { k = substr(arr[i], length(item_prefix(arr[i])) + 1); k = k SUBSEP (++occ[k]); keys[i] = k; set[k] = i }
+    }
+    function merge_list(    ind, ko, kb, kt, so, sb, st, i, k, s1, s2, c1, c2, num, line, p) {
+      ind = indent_of(b[1])
+      if (!all_items(o, no, ind) || !all_items(b, nb, ind) || !all_items(t, nt, ind)) return 0
+      split("", ko); split("", kb); split("", kt); split("", so); split("", sb); split("", st)
+      item_keys(o, no, ko, so); item_keys(b, nb, kb, sb); item_keys(t, nt, kt, st)
+      c1 = c2 = 0
+      for (i = 1; i <= no; i++) if ((ko[i] in sb) && (ko[i] in st)) s1[++c1] = ko[i]
+      for (i = 1; i <= nt; i++) if ((kt[i] in sb) && (kt[i] in so)) s2[++c2] = kt[i]
+      for (i = 1; i <= c1; i++) if (s1[i] != s2[i]) return 0
+      out_n = 0
+      for (i = 1; i <= no; i++) if (!((ko[i] in sb) && !(ko[i] in st))) out[++out_n] = o[i]
+      for (i = 1; i <= nt; i++) if (!(kt[i] in sb) && !(kt[i] in so)) out[++out_n] = t[i]
+      num = -1
+      if (match(b[1], /^[[:space:]]*[0-9]+/)) num = substr(b[1], ind + 1, RLENGTH - ind) + 0
+      for (i = 1; i <= out_n; i++) {
+        line = out[i]
+        if (num >= 0 && match(line, /^[[:space:]]*[0-9]+/)) { p = substr(line, 1, ind); line = p num substr(line, RLENGTH + 1); num++ }
+        print line
+      }
       return 1
     }
 
@@ -292,8 +345,20 @@ resolve_hunks() {
         print (date_of(t[1]) > date_of(o[1]) ? t[1] : o[1])
         return 1
       }
-      if (all_rows(o, no) && all_rows(b, nb) && all_rows(t, nt)) return merge_rows()
+      if (all_rows(o, no) && all_rows(b, nb) && all_rows(t, nt)) { if (merge_rows()) return 1 }
+      else if (merge_list()) return 1
+      # Snapshot block: re-measured every session, so the newer side wins.
+      # The older side still keeps any snapshot marker it added, e.g. one
+      # added by a MAP upgrade while a branch updated the values beneath it.
+      if (prefer == "ours") { keep_markers(t, nt, o, no); for (i = 1; i <= no; i++) print o[i]; print "hunk" >> used; return 1 }
+      if (prefer == "theirs") { keep_markers(o, no, t, nt); for (i = 1; i <= nt; i++) print t[i]; print "hunk" >> used; return 1 }
       return 0
+    }
+    function keep_markers(from, nf, into, ni,    i, j, has) {
+      for (i = 1; i <= nf; i++) if (from[i] ~ /<!--[[:space:]]*map-merge:[[:space:]]*snapshot/) {
+        has = 0; for (j = 1; j <= ni; j++) if (into[j] == from[i]) has = 1
+        if (!has) print from[i]
+      }
     }
 
     function emit_verbatim(    i) {
@@ -337,9 +402,30 @@ conflict_hunk() {
   printf '%s theirs\n' "$(printf '%*s' "$MARKER_SIZE" '' | tr ' ' '>')"
 }
 
+# Snapshot blocks hold values re-measured every session (test counts,
+# coverage, health) — both branches' numbers are stale after a merge anyway,
+# so conflicts there go to the newer side instead of stopping the merge.
+# A "<!-- map-merge: snapshot -->" comment marks its own block; one above the
+# first ## heading (under the # title) marks the whole file.
+SNAPSHOT_RE='<!--[[:space:]]*map-merge:[[:space:]]*snapshot'
+is_snapshot() { grep -q "$SNAPSHOT_RE" "$@" 2>/dev/null; }
+newest_date() { grep -o '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' "$1" 2>/dev/null | sort | tail -n 1; }
+newer_side() { # $1 = ours block, $2 = theirs block → "ours" or "theirs" (ours on a tie)
+  local a b
+  a="$(newest_date "$1")"; b="$(newest_date "$2")"
+  if [[ "$a" == "$b" ]]; then a="$(newest_date "$TMP/ours")"; b="$(newest_date "$TMP/theirs")"; fi
+  if [[ "$b" > "$a" ]]; then echo theirs; else echo ours; fi
+}
+: > "$TMP/snapshot-used"
+
 split_blocks "$TMP/ours" "$TMP/A"
 split_blocks "$TMP/base" "$TMP/O"
 split_blocks "$TMP/theirs" "$TMP/B"
+FILE_SNAPSHOT=0
+for f in "$TMP/ours" "$TMP/theirs"; do
+  awk '/^##+[[:space:]]/ { exit } { print }' "$f" > "$TMP/file-head"
+  if is_snapshot "$TMP/file-head"; then FILE_SNAPSHOT=1; fi
+done
 mkdir -p "$TMP/R"
 : > "$TMP/R/index"
 : > "$TMP/empty"
@@ -396,7 +482,9 @@ while IFS= read -r key; do
     if (( st == 0 )); then
       mv "$out.merged" "$out"
     elif (( st > 0 && st < 128 )); then
-      resolve_hunks < "$out.merged" > "$out"
+      prefer=""
+      if [[ "$FILE_SNAPSHOT" == 1 ]] || is_snapshot "$fa" "$fb"; then prefer="$(newer_side "$fa" "$fb")"; fi
+      resolve_hunks "$prefer" < "$out.merged" > "$out"
       rst=$?
       if (( rst == 1 )); then
         conflict=1
@@ -451,6 +539,10 @@ while IFS=$'\t' read -r id key; do
   fi
   cat "$TMP/R/$id" >> "$TMP/result"
 done < "$TMP/order"
+
+if [[ -s "$TMP/snapshot-used" ]]; then
+  echo "map-merge: $TARGET_PATH — $(wc -l < "$TMP/snapshot-used" | tr -d ' ') snapshot value(s) changed on both branches; kept the newer side's. Neither branch measured the merged code, so re-verify them next session." >&2
+fi
 
 if (( ! conflict )); then
   cp "$TMP/result" "$OURS"
