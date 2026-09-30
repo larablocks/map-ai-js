@@ -1,5 +1,5 @@
 # memory/gotchas.md
-_Critical — loaded every session | Max ~750 tokens (bytes ÷ 4) | Drop oldest when full_
+_Critical — loaded every session | Max ~750 tokens (bytes ÷ 4) | Remove least-actionable entries when full_
 _Claude-maintained — append immediately when time is wasted_
 
 <!-- Good entry: specific enough to act on.

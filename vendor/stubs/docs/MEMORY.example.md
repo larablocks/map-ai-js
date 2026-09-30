@@ -1,6 +1,5 @@
 # MEMORY.md
 _Claude-maintained learning index_
-_Copy this file to MEMORY.md on first clone — see docs/SETUP.md_
 _Detail lives in memory/ files — this is the index only_
 
 ## Summary

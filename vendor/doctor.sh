@@ -221,6 +221,47 @@ stub_placeholder_was_filled() {
   return 1
 }
 
+# True when every non-blank line in $1 is example content: it names a
+# [bracketed] placeholder or YYYY-MM-DD and isn't an italic note or HTML comment
+# (those are the stub's instructions, which can carry placeholders too). In a
+# docs/ file, a pure addition made only of these is a placeholder the project
+# deleted, not new template content, so it's skipped.
+is_all_placeholder_lines() {
+  local block="$1" line saw=1
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "$line" ]] && continue
+    saw=0
+    [[ "$line" =~ ^_.*_$ || "$line" == '<!--'* ]] && return 1
+    grep -qE '\[[^][]*\]|YYYY-MM-DD' <<< "$line" || return 1
+  done <<< "$block"
+  return "$saw"
+}
+
+# An updated template note keeps most of the old one's words; a project's own
+# note in the same spot shares few. Compares the sets of lowercased words of 4+
+# characters and needs 30% of the smaller set in common (real template
+# rewordings have all scored 0.36 or more; a project's own note, far less). Mirrors
+# Doctor::notesLookRelated().
+notes_look_related() {
+  local a b common na nb smaller
+  a="$(printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C grep -oE '[a-z0-9_./-]{4,}' | LC_ALL=C sort -u)"
+  b="$(printf '%s' "$2" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C grep -oE '[a-z0-9_./-]{4,}' | LC_ALL=C sort -u)"
+  na=0; nb=0; common=0
+  [[ -n "$a" ]] && na="$(wc -l <<< "$a")"
+  [[ -n "$b" ]] && nb="$(wc -l <<< "$b")"
+  if [[ -n "$a" && -n "$b" ]]; then
+    common="$(LC_ALL=C comm -12 <(printf '%s\n' "$a") <(printf '%s\n' "$b") | wc -l)"
+  fi
+  smaller=$(( na < nb ? na : nb ))
+  if [[ "$smaller" -eq 0 ]]; then
+    [[ "$na" -eq "$nb" ]]
+    return
+  fi
+  (( common * 10 >= smaller * 3 ))
+}
+
 # Prints everything before a whitespace-preceded # to stdout and returns 0, or
 # returns 1 if $1 has no such trailing comment. `#` has no reserved meaning in
 # prose, so callers must scope this to fenced code lines themselves.
@@ -274,20 +315,25 @@ classify_scaffold_diff() {
 
   compute_fence_lines "$target"
 
+  local is_docs=1
+  [[ "$(basename "$(dirname "$stub")")" == docs ]] && is_docs=0
+
   local diff_output old_start old_count new_count removed added in_hunk=0
   diff_output="$(diff --unified=0 "$target" "$stub" 2>/dev/null || true)"
 
   eval_hunk() {
     [[ "$in_hunk" -ne 1 ]] && return
     if [[ "$old_count" -eq 0 && "$new_count" -gt 0 ]]; then
-      SCAFFOLD_HAS_ADDITIONS=1
+      if ! { [[ "$is_docs" -eq 0 ]] && is_all_placeholder_lines "$added"; }; then
+        SCAFFOLD_HAS_ADDITIONS=1
+      fi
     elif [[ "$old_count" -gt 0 && "$new_count" -gt 0 ]]; then
       local is_inline_comment=1
       if [[ "$old_count" -eq 1 && "$new_count" -eq 1 ]] && is_fenced_line "$old_start"; then
         is_safe_inline_comment_modification "$removed" "$added" && is_inline_comment=0
       fi
       local looks_safe=1
-      is_safe_note_modification "$removed" "$added" && looks_safe=0
+      is_safe_note_modification "$removed" "$added" && notes_look_related "$removed" "$added" && looks_safe=0
       [[ "$is_inline_comment" -eq 0 ]] && looks_safe=0
       if [[ "$looks_safe" -eq 0 ]] && ! stub_placeholder_was_filled "$removed" "$added"; then
         SCAFFOLD_HAS_ADDITIONS=1
@@ -343,11 +389,15 @@ compute_fixable_hunks() {
   diff_output="$(diff --unified=0 "$target" "$stub" 2>/dev/null || true)"
   [[ -z "$diff_output" ]] && return 1
 
+  local is_docs=1
+  [[ "$(basename "$(dirname "$stub")")" == docs ]] && is_docs=0
+
   local old_start="" old_count=1 new_count=1 removed="" added="" in_hunk=0
 
   save_hunk() {
     [[ "$in_hunk" -ne 1 ]] && return
     if [[ "$old_count" -eq 0 && "$new_count" -gt 0 ]]; then
+      [[ "$is_docs" -eq 0 ]] && is_all_placeholder_lines "$added" && return
       FH_STARTS+=("$old_start")
       FH_COUNTS+=(0)
       FH_BODIES+=("$added")
@@ -356,7 +406,7 @@ compute_fixable_hunks() {
     [[ "$old_count" -eq 0 || "$new_count" -eq 0 ]] && return
 
     local safe=1
-    is_safe_note_modification "$removed" "$added" && safe=0
+    is_safe_note_modification "$removed" "$added" && notes_look_related "$removed" "$added" && safe=0
     if [[ "$safe" -ne 0 && "$old_count" -eq 1 && "$new_count" -eq 1 ]] && is_fenced_line "$old_start"; then
       is_safe_inline_comment_modification "$removed" "$added" && safe=0
     fi

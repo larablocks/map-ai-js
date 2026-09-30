@@ -4,7 +4,7 @@ description: [One sentence: what this skill does and when Claude Code should inv
 ---
 
 # [Skill Name]
-_Copy this folder to .claude/skills/[skill-name]/ and rename SKILL.md's frontmatter `name` to match the folder name_
+_Copy this folder to .claude/skills/[skill-name]/, rename this file to SKILL.md, and set the frontmatter `name` to match the folder name — named SKILL.example.md so Claude Code doesn't list this template as a real skill_
 _Claude Code auto-discovers skills under .claude/skills/ — no @import or AGENTS.md wiring needed_
 
 ## When to use

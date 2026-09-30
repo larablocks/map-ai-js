@@ -14,7 +14,7 @@ Load CLAUDE.local.md if it exists or equivalent local rules file for your tool �
 
 ## Session start ritual
 0. First-run check: if this file's header above still shows an unfilled name/stack/date placeholder, or docs/STATUS.md / docs/ARCHITECTURE.md still show their bracket placeholders (e.g. a milestone or system-overview placeholder), this project has never been initialized by an AI agent — before doing anything else, including responding to the developer's first message: read the codebase (composer.json/package.json, README, directory structure) to understand what it is, fill in this file's header/Commands section if still unfilled, then replace docs/STATUS.md's and docs/ARCHITECTURE.md's placeholders with real content based on what you found
-1. Read docs/STATUS.md — if it contains only placeholder text, tell developer to fill it in
+1. Read docs/STATUS.md
 2. Read docs/MEMORY.md — if missing, create it from docs/MEMORY.example.md (and docs/memory/gotchas.md, docs/memory/shared.md from their examples if also missing), then load it and note topic files — any other docs/memory/*.md a Load rule below names self-creates from its same-named .example.md the first time that rule fires
 3. Read docs/BUGS.md — note any blocking or high severity bugs before starting work
 4. Ask the developer what they want to work on before acting
@@ -28,12 +28,12 @@ Load CLAUDE.local.md if it exists or equivalent local rules file for your tool �
 _If any command above still shows a `[...]` placeholder, detect it by reading composer.json, package.json, and Makefile, then replace the placeholder in this file._
 
 ## Load when relevant
+_Read each file below only when its rule applies, not at session start — keep these as plain paths (tools that support @-imports load an @-prefixed path every session)_
 Read docs/ARCHITECTURE.md when working on structure or new features
 Read docs/ARCHITECTURE_HISTORY.md when revisiting an architectural choice
 Read docs/CODE_PATTERNS.md when writing application code, migrations, config or scripts
 Read docs/SCHEMA.md when touching the database or internal service contracts
 Read docs/COMPLIANCE.md when touching data classified as sensitive, exports, deletions, or third-party data integrations
-Read docs/BUGS.md when writing tests or modifying areas with known issues
 Read docs/TESTING_COVERAGE.md when writing or reviewing tests
 Read docs/DOCKER.md when running commands or diagnosing environment issues (skip if project has no Docker)
 Read docs/SETUP.md when helping with local dev or onboarding questions
@@ -70,7 +70,7 @@ _Priority order: BUGS.md first, then ARCHITECTURE_HISTORY.md, then others_
 - Custom command added, changed, or removed → update docs/COMMANDS.md in the relevant category (add, edit, or delete the entry and its Quick index row), note if destructive
 - Agent/API/integration/component changes materially → update its docs/agents|api|integrations|architecture/[name].md file (including its frontmatter description); new docs/architecture/[name].md → also add its row to ARCHITECTURE.md's Component docs table
 - A design token changes, Docker/environment config changes, a setup step changes, or a compliance obligation changes → do NOT edit docs/DESIGN.md, docs/DOCKER.md, docs/SETUP.md, or docs/COMPLIANCE.md directly; draft the proposed change inline in your response and ask the developer to confirm before writing it — for docs/COMPLIANCE.md, check its own Constraints on AI-assisted changes section first: some changes require a specific artifact in place (e.g. a documented agreement), not just a verbal yes
-- Task complete → ask the developer if they want a QA file generated; if yes, check branch name for ticket number (e.g. ABC-123) and create docs/qa/[TICKET].md or docs/qa/[feature-slug].md from the example
+- Developer asks for a QA file (never offer one unprompted) → check branch name for ticket number (e.g. ABC-123) and create docs/qa/[TICKET].md or docs/qa/[feature-slug].md from the example
 
 ## Session end — do this before closing
 1. Update docs/STATUS.md — milestone/feature progress, health indicators, project-level next priorities
@@ -90,7 +90,7 @@ New agent/API/integration/component docs → scan the target folder's frontmatte
 
 ## Hard rules
 - IMPORTANT: Never delete files, database records, or data without explicit developer confirmation
-- IMPORTANT: Never modify AGENTS.md, CLAUDE.md, GEMINI.md, or .claude/rules/*.md without explicit developer instruction — these are MAP configuration files, not AI-maintained docs. Running `doctor.sh`/`Doctor::fix()` counts as that instruction — it only ever applies pure additions or safe note/comment swaps, never rewrites real content
+- IMPORTANT: Never modify AGENTS.md, CLAUDE.md, GEMINI.md, or .claude/rules/*.md without explicit developer instruction (the first-run check's header/Commands fill-in above is the one exception) — these are MAP configuration files, not AI-maintained docs. Running `doctor.sh`/`Doctor::fix()` counts as that instruction — it only ever applies pure additions or safe note/comment swaps, never rewrites real content
 - Use YYYY-MM-DD for all dates in all files
 - IMPORTANT: Only update docs/TESTING_COVERAGE.md after running coverage — never estimate without fresh output
 - IMPORTANT: Never skip the session start ritual

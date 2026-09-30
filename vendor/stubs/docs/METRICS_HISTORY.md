@@ -11,6 +11,6 @@ _For leadership: read the most recent entry for current numbers, skim the whole 
 | Coverage | [N]% | [+/-N pts] |
 | Open bugs | [N] | [+/-N] |
 | Blocking bugs | [N] | [+/-N] |
-| Milestones complete | [N]/[M] | — |
+| Milestones complete | [N]/[M] | — (remove row if not using phases) |
 
 ---

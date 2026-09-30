@@ -18,6 +18,7 @@ _Claude verifies build/test status by running commands — never assumes from la
 | Blocker | none | — |
 
 ## Last meaningful progress
+_Keep about two weeks of entries here — this file loads every session (cap ~5,000 tokens). Move older entries to docs/STATUS_ARCHIVE.md verbatim (newest first), and replaced "Current phase" text to its Superseded section_
 - [Project created]
 - [Initial structure committed]
 

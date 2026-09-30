@@ -67,7 +67,7 @@ SCAFFOLD_FILES=(
   GEMINI.md
   .claude/rules/security.md
   .claude/rules/testing.md
-  .claude/skills/example-skill/SKILL.md
+  .claude/skills/example-skill/SKILL.example.md
   .github/copilot-instructions.md
   docs/ARCHITECTURE.md
   docs/ARCHITECTURE_HISTORY.md
@@ -84,6 +84,7 @@ SCAFFOLD_FILES=(
   docs/SCHEMA.md
   docs/SETUP.md
   docs/STATUS.md
+  docs/STATUS_ARCHIVE.md
   docs/TESTING_COVERAGE.md
 )
 
@@ -118,6 +119,7 @@ GITATTRIBUTES_BLOCK=(
   "docs/ARCHITECTURE_HISTORY.md merge=map-ai"
   "docs/METRICS_HISTORY.md merge=map-ai"
   "docs/STATUS.md merge=map-ai"
+  "docs/STATUS_ARCHIVE.md merge=map-ai"
   "docs/ARCHITECTURE.md merge=map-ai"
   "docs/CODE_PATTERNS.md merge=map-ai"
   "docs/COMMANDS.md merge=map-ai"

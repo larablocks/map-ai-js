@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # map-token-check.sh — Claude Code SessionStart + PostToolUse hook.
-# Enforces MAP's token caps on the files that cost context: AGENTS.md and
-# docs/memory/*.md. Caps are in tokens, not lines or entries, since one long
+# Enforces MAP's token caps on the files that cost context: AGENTS.md,
+# docs/STATUS.md and docs/memory/*.md. Caps are in tokens, not lines or entries, since one long
 # line or entry can cost as much as many short ones. Tokens are estimated as
 # bytes ÷ 4 (rounded up), the same estimate doctor.sh and Doctor.php use.
 #
@@ -17,6 +17,7 @@ AGENTS_MD_MAX_TOKENS=3000
 GOTCHAS_MAX_TOKENS=750
 SHARED_MAX_TOKENS=1500
 MEMORY_TOPIC_MAX_TOKENS=2500
+STATUS_MAX_TOKENS=5000
 
 ROOT="${CLAUDE_PROJECT_DIR:-.}"
 cd "$ROOT"
@@ -33,6 +34,7 @@ fi
 cap_for() {
   case "$1" in
     AGENTS.md) echo "$AGENTS_MD_MAX_TOKENS" ;;
+    docs/STATUS.md) echo "$STATUS_MAX_TOKENS" ;;
     docs/memory/*.example.md) ;;
     docs/memory/gotchas.md) echo "$GOTCHAS_MAX_TOKENS" ;;
     docs/memory/shared.md) echo "$SHARED_MAX_TOKENS" ;;
@@ -73,7 +75,7 @@ if grep -q '"hook_event_name"[[:space:]]*:[[:space:]]*"PostToolUse"' <<< "$INPUT
 else
   EVENT="SessionStart"
   shopt -s nullglob
-  for path in AGENTS.md docs/memory/*.md; do
+  for path in AGENTS.md docs/STATUS.md docs/memory/*.md; do
     if line="$(over_cap "$path")"; then
       over+=("$line")
     fi
@@ -86,11 +88,16 @@ fi
 
 details=()
 agents_over=0
+status_over=0
 memory_over=0
 for line in "${over[@]}"; do
   IFS='|' read -r path tokens cap <<< "$line"
   details+=("${path} is ~${tokens} tokens (cap ${cap})")
-  if [[ "$path" == "AGENTS.md" ]]; then agents_over=1; else memory_over=1; fi
+  case "$path" in
+    AGENTS.md) agents_over=1 ;;
+    docs/STATUS.md) status_over=1 ;;
+    *) memory_over=1 ;;
+  esac
 done
 
 joined="${details[0]}"
@@ -101,6 +108,9 @@ done
 MESSAGE="MAP token cap (bytes ÷ 4): ${joined}. These files cost context whenever they load, so every token over the cap is paid every time."
 if (( agents_over )); then
   MESSAGE+=" AGENTS.md: propose specific cuts to the developer now (move detail into the docs/ file it belongs in, tighten wording, drop rules the project no longer needs) and add nothing further until it is back under the cap."
+fi
+if (( status_over )); then
+  MESSAGE+=" docs/STATUS.md: move the oldest 'Last meaningful progress' entries (and any replaced 'Current phase' text) to docs/STATUS_ARCHIVE.md verbatim, newest first, until it is back under the cap."
 fi
 if (( memory_over )); then
   MESSAGE+=" Memory files: trim them back under the cap now, following each file's own header rule (summarise or remove resolved / least-actionable entries), and update the docs/MEMORY.md summary table."
