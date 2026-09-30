@@ -38,7 +38,7 @@ npx map-ai-js doctor --fix        # applies fixable findings unattended, then re
 npx map-ai-js doctor --interactive # same fixable set as --fix, confirmed one file at a time
 ```
 
-`doctor` never touches real project content — it only ever adds missing files/lines, or replaces a stub's own instructional text (a stale italic note, HTML comment, or fenced-code trailing comment) with its current wording. Anything else — a real difference in `AGENTS.md`, `docs/ARCHITECTURE.md`, etc. — is reported for you to merge by hand, never auto-applied. See [`larablocks/map-ai`'s README](https://github.com/larablocks/map-ai#doctor--checking-and-repairing-drift-automatically) for the exact safety rules; this package's `doctor`/`install` commands are the same `doctor.sh`/`install.sh` scripts, unmodified.
+`doctor` never touches real project content — it only ever adds missing files/lines, or replaces a stub's own instructional text (a stale italic note, HTML comment, or fenced-code trailing comment) with its current wording — and only when your line is recognisably an older wording of the stub's, not a note you wrote yourself. It never re-adds a placeholder line you deleted. Anything else — a real difference in `AGENTS.md`, `docs/ARCHITECTURE.md`, etc. — is reported for you to merge by hand, never auto-applied. See [`larablocks/map-ai`'s README](https://github.com/larablocks/map-ai#doctor--checking-and-repairing-drift-automatically) for the exact safety rules; this package's `doctor`/`install` commands are the same `doctor.sh`/`install.sh` scripts, unmodified.
 
 ## Why a separate package per ecosystem?
 
